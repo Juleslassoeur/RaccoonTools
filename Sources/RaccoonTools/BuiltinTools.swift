@@ -752,8 +752,7 @@ func registerBuiltinTools() {
                 .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return "Error: could not fetch content from \(url)" }
-            // Truncate to ~8000 chars to fit LLM context
-            let truncated = String(text.prefix(8000))
+            let truncated = truncateForLLM(text)
             let toolPath = "summarize link"
             let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
             let provider = settings.getProvider(for: toolPath)
@@ -790,7 +789,7 @@ func registerBuiltinTools() {
             let transcript = vttToPlainText(raw)
             guard !transcript.isEmpty else { return "Error: transcript is empty" }
 
-            let truncated = String(transcript.prefix(8000))
+            let truncated = truncateForLLM(transcript)
             let toolPath = "summarize video"
             let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
             let provider = settings.getProvider(for: toolPath)
@@ -821,7 +820,7 @@ func registerBuiltinTools() {
                 return "Error: file doesn't appear to be a text file"
             }
             guard !content.isEmpty else { return "Error: file is empty" }
-            let truncated = String(content.prefix(8000))
+            let truncated = truncateForLLM(content)
             let filename = (expanded as NSString).lastPathComponent
             let toolPath = "summarize file"
             let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
@@ -1084,6 +1083,15 @@ func registerBuiltinTools() {
         parameterName: nil,
         handler: { _ in "__HISTORY__" }
     ))
+}
+
+// MARK: - LLM input truncation
+
+// Cap content sent to the LLM (~25-30k tokens, safe for all supported models)
+// and append an explicit marker when truncation actually happens.
+func truncateForLLM(_ text: String, limit: Int = 100_000) -> String {
+    guard text.count > limit else { return text }
+    return String(text.prefix(limit)) + "\n\n[content truncated]"
 }
 
 // MARK: - VTT to plain text converter

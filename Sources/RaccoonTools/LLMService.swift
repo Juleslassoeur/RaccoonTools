@@ -46,7 +46,7 @@ struct LLMProviderConfig: Codable, Identifiable, Hashable {
 
     static var defaultClaude: LLMProviderConfig {
         .init(id: "claude", name: "Claude", type: .claude, apiKey: "",
-              model: "claude-sonnet-4-20250514", baseURL: "https://api.anthropic.com")
+              model: "claude-sonnet-4-6", baseURL: "https://api.anthropic.com")
     }
     static var defaultOpenAI: LLMProviderConfig {
         .init(id: "openai", name: "OpenAI", type: .openai, apiKey: "",
@@ -68,7 +68,7 @@ struct ToolLLMBinding: Codable {
 }
 
 class LLMService {
-    static func call(provider: LLMProviderConfig?, systemPrompt: String, userMessage: String) async throws -> String {
+    static func call(provider: LLMProviderConfig?, systemPrompt: String, userMessage: String, maxTokens: Int = 8192) async throws -> String {
         guard let provider else {
             return "Error: No LLM provider configured for this tool.\nGo to Raccoon Tools > Settings > Tools to configure."
         }
@@ -94,7 +94,7 @@ class LLMService {
         }
 
         switch provider.type {
-        case .claude: return try await callClaude(provider, system: fullPrompt, message: userMessage)
+        case .claude: return try await callClaude(provider, system: fullPrompt, message: userMessage, maxTokens: maxTokens)
         case .openai, .custom: return try await callOpenAI(provider, system: fullPrompt, message: userMessage)
         case .gemini: return try await callGemini(provider, system: fullPrompt, message: userMessage)
         case .ollama: return try await callOllama(provider, system: fullPrompt, message: userMessage)
@@ -103,18 +103,18 @@ class LLMService {
 
     // MARK: - Claude
 
-    private static func callClaude(_ p: LLMProviderConfig, system: String, message: String) async throws -> String {
+    private static func callClaude(_ p: LLMProviderConfig, system: String, message: String, maxTokens: Int) async throws -> String {
         let url = URL(string: "\(p.baseURL)/v1/messages")!
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(p.apiKey, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.timeoutInterval = 30
+        req.timeoutInterval = 120 // long generations (summaries) can take a while
 
         let body: [String: Any] = [
             "model": p.model,
-            "max_tokens": 1024,
+            "max_tokens": maxTokens,
             "system": system,
             "messages": [["role": "user", "content": message]]
         ]
@@ -144,7 +144,7 @@ class LLMService {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(p.apiKey)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 30
+        req.timeoutInterval = 120
 
         let body: [String: Any] = [
             "model": p.model,
@@ -190,7 +190,7 @@ class LLMService {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 60
+        req.timeoutInterval = 120
 
         var body: [String: Any] = [
             "system_instruction": ["parts": [["text": system]]],

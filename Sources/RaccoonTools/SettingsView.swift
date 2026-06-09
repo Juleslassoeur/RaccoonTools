@@ -492,7 +492,7 @@ struct LLMProvidersTab: View {
                 req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
                 req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
                 req.httpBody = try JSONSerialization.data(withJSONObject: [
-                    "model": "claude-sonnet-4-20250514", "max_tokens": 1,
+                    "model": "claude-sonnet-4-6", "max_tokens": 1,
                     "messages": [["role": "user", "content": "hi"]]
                 ])
                 let (data, resp) = try await URLSession.shared.data(for: req)
@@ -510,11 +510,9 @@ struct LLMProvidersTab: View {
                     }
                 }
                 return FetchResult(models: [
-                    "claude-opus-4-20250514",
-                    "claude-sonnet-4-20250514",
-                    "claude-haiku-4-20250414",
-                    "claude-3-5-sonnet-20241022",
-                    "claude-3-5-haiku-20241022",
+                    "claude-opus-4-6",
+                    "claude-sonnet-4-6",
+                    "claude-haiku-4-5",
                 ])
             }
         } catch {

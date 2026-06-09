@@ -1419,7 +1419,7 @@ struct SpotlightView: View {
             let toolPath = "file qa"
             let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
             let provider = settings.getProvider(for: toolPath)
-            let truncated = String(state.qaFileContent.prefix(8000))
+            let truncated = truncateForLLM(state.qaFileContent)
 
             // Build conversation context
             let convContext = state.qaMessages.suffix(10).map { msg in
