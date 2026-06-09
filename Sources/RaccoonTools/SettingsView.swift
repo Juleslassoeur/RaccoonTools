@@ -12,6 +12,8 @@ struct SettingsView: View {
                 .tabItem { Label("Contextual", systemImage: "text.cursor") }
             ToolBindingsTab()
                 .tabItem { Label("Tools", systemImage: "wrench") }
+            InstantEditSettingsTab()
+                .tabItem { Label("Instant Edit", systemImage: "bolt") }
         }
         .frame(width: 700, height: 500)
     }

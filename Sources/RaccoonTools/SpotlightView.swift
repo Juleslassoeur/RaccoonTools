@@ -101,7 +101,18 @@ struct SpotlightView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .frame(width: 680)
-        .frame(minHeight: 380)
+        // Report the natural content height so the panel can adapt (grows/shrinks)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: SpotlightContentHeightKey.self, value: geo.size.height)
+            }
+        )
+        .onPreferenceChange(SpotlightContentHeightKey.self) { height in
+            NotificationCenter.default.post(
+                name: .spotlightContentHeightChanged, object: nil,
+                userInfo: ["height": height]
+            )
+        }
         .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
             guard let provider = providers.first else { return false }
             provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { data, _ in
@@ -269,7 +280,8 @@ struct SpotlightView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .frame(maxHeight: 280)
+                // Hug content when few rows so the panel can stay compact
+                .frame(maxHeight: min(280, CGFloat(max(segments.count, 1)) * 34 + 8))
                 .onChange(of: state.selectedIndex) { idx in
                     withAnimation(.easeOut(duration: 0.1)) {
                         proxy.scrollTo("seg-\(idx)", anchor: .center)
@@ -298,7 +310,8 @@ struct SpotlightView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .frame(maxHeight: 280)
+                // Hug content when few rows so the panel can stay compact
+                .frame(maxHeight: min(280, CGFloat(max(suggestions.count, 1)) * 34 + 8))
                 .onChange(of: state.selectedIndex) { idx in
                     withAnimation(.easeOut(duration: 0.1)) {
                         proxy.scrollTo("tool-\(idx)", anchor: .center)
