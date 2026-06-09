@@ -59,8 +59,49 @@ extension SpotlightView {
                 Divider()
             }
 
+            // Tool suggestions while typing — in normal layout flow (not an
+            // overlay) so up to 4 rows are ALWAYS visible below the input,
+            // and the adaptive panel height accounts for them
+            if !state.input.trimmingCharacters(in: .whitespaces).isEmpty && !commandState.suggestions.isEmpty && !state.isRunning {
+                VStack(spacing: 0) {
+                    ForEach(Array(commandState.suggestions.prefix(4).enumerated()), id: \.element.id) { index, tool in
+                        HStack(spacing: 6) {
+                            Image(systemName: "terminal")
+                                .font(.caption2)
+                                .foregroundColor(.accentColor)
+                                .frame(width: 14)
+                            if tool.usesLLM {
+                                Text("LLM")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(.purple.opacity(0.7))
+                                    .padding(.horizontal, 3)
+                                    .padding(.vertical, 1)
+                                    .background(Color.purple.opacity(0.1))
+                                    .cornerRadius(2)
+                            }
+                            Text(tool.fullPath)
+                                .font(.system(.caption, design: .monospaced))
+                                .fontWeight(.medium)
+                            Spacer()
+                            Text(tool.description)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(index == state.selectedIndex ? Color.accentColor.opacity(0.15) : Color.clear)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            state.input = tool.fullPath + " "
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+                Divider()
+            }
+
             // Chat messages
-            ZStack(alignment: .top) {
                 ScrollViewReader { proxy in
                     SelfSizingScrollView(maxHeight: 300) {
                         VStack(spacing: 8) {
@@ -135,50 +176,6 @@ extension SpotlightView {
                         }
                     }
                 }
-
-                // Compact tool suggestions overlay
-                if !state.input.trimmingCharacters(in: .whitespaces).isEmpty && !commandState.suggestions.isEmpty && !state.isRunning {
-                    VStack(spacing: 0) {
-                        ForEach(Array(commandState.suggestions.prefix(4).enumerated()), id: \.element.id) { index, tool in
-                            HStack(spacing: 6) {
-                                Image(systemName: "terminal")
-                                    .font(.caption2)
-                                    .foregroundColor(.accentColor)
-                                    .frame(width: 14)
-                                if tool.usesLLM {
-                                    Text("LLM")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundColor(.purple.opacity(0.7))
-                                        .padding(.horizontal, 3)
-                                        .padding(.vertical, 1)
-                                        .background(Color.purple.opacity(0.1))
-                                        .cornerRadius(2)
-                                }
-                                Text(tool.fullPath)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .fontWeight(.medium)
-                                Spacer()
-                                Text(tool.description)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(index == state.selectedIndex ? Color.accentColor.opacity(0.15) : Color.clear)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                state.input = tool.fullPath + " "
-                            }
-                        }
-                    }
-                    .background(.ultraThickMaterial)
-                    .cornerRadius(8)
-                    .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 4)
-                }
-            }
 
             // Action bar — always show Undo when there's history, Apply only when there's an unapplied edit
             let hasUnappliedEdit = state.freeMessages.contains { $0.source == "edit" && !state.appliedMessageIDs.contains($0.id) }

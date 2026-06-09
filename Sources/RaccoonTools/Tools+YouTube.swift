@@ -11,6 +11,17 @@ import Foundation
     return min(max(pct / 100, 0), 1)
 }
 
+/// Resolve yt-dlp and make sure a JavaScript runtime is available: YouTube
+/// extraction now requires solving JS challenges (nsig / PO tokens), and
+/// yt-dlp needs deno (preferred) or node for that. Without one, downloads
+/// fail with confusing impersonation/PO-token warnings.
+private func ensureYtDlp() async throws -> (path: String, commonArgs: [String]) {
+    let ytdlp = try await ensureDep("yt-dlp", brew: "yt-dlp")
+    _ = try? await ensureDep("deno", brew: "deno")
+    // Allow node as a fallback runtime (only deno is enabled by default)
+    return (ytdlp, ["--js-runtimes", "deno", "--js-runtimes", "node"])
+}
+
 func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
     // ============================================================
     // MARK: - GET tools
@@ -23,9 +34,9 @@ func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
         parameterName: "url",
         handler: { url in
             guard !url.isEmpty else { return "Error: please provide a YouTube URL" }
-            let ytdlp = try await ensureDep("yt-dlp", brew: "yt-dlp")
+            let (ytdlp, commonArgs) = try await ensureYtDlp()
             let taskID = await runningTaskID(for: "get youtube sound")
-            return try await shellExec(ytdlp, args: [
+            return try await shellExec(ytdlp, args: commonArgs + [
                 "-x", "--audio-format", "mp3",
                 "-o", "\(settings.outputFolder)/%(title)s.%(ext)s", url
             ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseYtDlpProgress))
@@ -39,9 +50,9 @@ func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
         parameterName: "url",
         handler: { url in
             guard !url.isEmpty else { return "Error: please provide a YouTube URL" }
-            let ytdlp = try await ensureDep("yt-dlp", brew: "yt-dlp")
+            let (ytdlp, commonArgs) = try await ensureYtDlp()
             let taskID = await runningTaskID(for: "get youtube video")
-            return try await shellExec(ytdlp, args: [
+            return try await shellExec(ytdlp, args: commonArgs + [
                 "-o", "\(settings.outputFolder)/%(title)s.%(ext)s", url
             ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseYtDlpProgress))
         }
@@ -54,13 +65,19 @@ func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
         parameterName: "url",
         handler: { url in
             guard !url.isEmpty else { return "Error: please provide a YouTube URL" }
-            let ytdlp = try await ensureDep("yt-dlp", brew: "yt-dlp")
+            let (ytdlp, commonArgs) = try await ensureYtDlp()
             let output = settings.outputFolder
             let taskID = await runningTaskID(for: "get youtube transcript")
 
-            // Download subtitles (VTT format)
-            let result = try await shellExec(ytdlp, args: [
-                "--write-auto-sub", "--sub-lang", "en",
+            // Download subtitles (VTT format). Manual subs are preferred over
+            // auto-generated ones; accept English, French and the configured
+            // translate target so non-English videos work too.
+            var subLangs = ["en", "fr"]
+            let target = settings.defaultTranslateTarget
+            if !target.isEmpty && !subLangs.contains(target) { subLangs.append(target) }
+            let result = try await shellExec(ytdlp, args: commonArgs + [
+                "--write-sub", "--write-auto-sub",
+                "--sub-lang", subLangs.joined(separator: ","),
                 "--skip-download",
                 "-o", "\(output)/%(title)s", url
             ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseYtDlpProgress))
