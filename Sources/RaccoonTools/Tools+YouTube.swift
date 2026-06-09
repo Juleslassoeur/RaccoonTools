@@ -11,6 +11,56 @@ import Foundation
     return min(max(pct / 100, 0), 1)
 }
 
+// MARK: - Subtitle track selection (pure, unit-testable)
+
+struct SubtitleTrackChoice: Equatable {
+    let lang: String
+    let isAutomatic: Bool
+}
+
+/// Pick the best subtitle track from a yt-dlp `-J` info dump, instead of
+/// blindly requesting fixed languages: requesting a language that doesn't
+/// exist hits YouTube's on-the-fly translation endpoint, which is heavily
+/// rate-limited (HTTP 429).
+///
+/// Order: manual subs in a preferred language → any manual subs → the
+/// ORIGINAL auto-generated track ("xx-orig", served directly, not throttled)
+/// → auto track matching the video language → auto in a preferred language
+/// → any auto track.
+func chooseSubtitleTrack(infoJSON: String, preferred: [String]) -> SubtitleTrackChoice? {
+    // yt-dlp's -J dump can contain raw control characters inside string
+    // values, which strict JSON parsers reject — strip them (the dump is a
+    // single line, so no meaningful whitespace is lost).
+    let sanitized = String(String.UnicodeScalarView(infoJSON.unicodeScalars.filter { $0.value >= 0x20 }))
+    guard let start = sanitized.firstIndex(of: "{"),
+          let data = String(sanitized[start...]).data(using: .utf8),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+    let manual = (json["subtitles"] as? [String: Any]) ?? [:]
+    let auto = (json["automatic_captions"] as? [String: Any]) ?? [:]
+    let prefs = preferred.filter { !$0.isEmpty }
+
+    func match(_ keys: some Collection<String>, _ lang: String) -> String? {
+        keys.first { $0 == lang || $0.hasPrefix(lang + "-") }
+    }
+
+    for p in prefs {
+        if let lang = match(manual.keys, p) { return SubtitleTrackChoice(lang: lang, isAutomatic: false) }
+    }
+    if let lang = manual.keys.sorted().first { return SubtitleTrackChoice(lang: lang, isAutomatic: false) }
+
+    if let orig = auto.keys.first(where: { $0.hasSuffix("-orig") }) {
+        return SubtitleTrackChoice(lang: orig, isAutomatic: true)
+    }
+    if let videoLang = json["language"] as? String, let lang = match(auto.keys, videoLang) {
+        return SubtitleTrackChoice(lang: lang, isAutomatic: true)
+    }
+    for p in prefs {
+        if let lang = match(auto.keys, p) { return SubtitleTrackChoice(lang: lang, isAutomatic: true) }
+    }
+    if let lang = auto.keys.sorted().first { return SubtitleTrackChoice(lang: lang, isAutomatic: true) }
+    return nil
+}
+
 /// Resolve yt-dlp and make sure a JavaScript runtime is available: YouTube
 /// extraction now requires solving JS challenges (nsig / PO tokens), and
 /// yt-dlp needs deno (preferred) or node for that. Without one, downloads
@@ -69,15 +119,21 @@ func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
             let output = settings.outputFolder
             let taskID = await runningTaskID(for: "get youtube transcript")
 
-            // Download subtitles (VTT format). Manual subs are preferred over
-            // auto-generated ones; accept English, French and the configured
-            // translate target so non-English videos work too.
-            var subLangs = ["en", "fr"]
-            let target = settings.defaultTranslateTarget
-            if !target.isEmpty && !subLangs.contains(target) { subLangs.append(target) }
+            // 1) Ask what subtitle tracks actually exist (one request) and
+            // pick the best one — requesting a missing language triggers
+            // YouTube's rate-limited translation endpoint (HTTP 429).
+            let infoJSON = try await shellExec(ytdlp, args: commonArgs + ["-J", url], taskID: taskID)
+            guard let choice = chooseSubtitleTrack(
+                infoJSON: infoJSON,
+                preferred: [settings.defaultTranslateTarget, "fr", "en"]
+            ) else {
+                return "No subtitles available for this video (neither manual nor auto-generated)."
+            }
+
+            // 2) Download exactly that track
             let result = try await shellExec(ytdlp, args: commonArgs + [
-                "--write-sub", "--write-auto-sub",
-                "--sub-lang", subLangs.joined(separator: ","),
+                choice.isAutomatic ? "--write-auto-sub" : "--write-sub",
+                "--sub-lang", choice.lang,
                 "--skip-download",
                 "-o", "\(output)/%(title)s", url
             ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseYtDlpProgress))
@@ -96,7 +152,8 @@ func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
                 }
             }
 
-            return result.contains("Error") ? result : "Transcript saved as .txt to \(output)"
+            let trackDesc = choice.isAutomatic ? "\(choice.lang), auto-generated" : choice.lang
+            return result.contains("Error") ? result : "Transcript (\(trackDesc)) saved as .txt to \(output)"
         }
     ))
 }

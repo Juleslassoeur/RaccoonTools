@@ -154,6 +154,13 @@ class SpotlightState: ObservableObject {
     var freeSelectionStart: Int = 0       // cursor position where the selection began
     var freeLastAppliedText: String = ""  // text currently in the document (for re-selection length)
 
+    // Frecency scores snapshot used for suggestion ordering. Single source of
+    // truth shared by the rendered list AND the arrow/Enter key handler — if
+    // they computed scores independently, a tool run mutating the history
+    // would silently reorder one but not the other and Enter would pick the
+    // wrong tool. Refreshed by the view on appear and on input change.
+    var suggestionScores: [String: Double] = [:]
+
     // Background running tasks (visible in menu bar even when spotlight is closed)
     @Published var runningTasks: [RunningTaskInfo] = []
 
