@@ -67,30 +67,40 @@ enum PanelGeometry {
         return contextualOrigin(panelSize: panelSize, selectionRect: sel, visibleFrame: visibleFrame)
     }
 
-    /// Position just below the selection (or above it when there is no room
-    /// below), clamped to the screen's visible frame so the panel never
-    /// overlaps the selection when avoidable.
+    /// Position just below the selection, else beside it (right, then left).
+    /// NEVER above: the panel grows downward as the conversation streams in,
+    /// and a panel above the selection would end up covering the very text
+    /// being edited.
     static func contextualOrigin(panelSize: CGSize, selectionRect: CGRect, visibleFrame: CGRect) -> CGPoint {
         let minX = visibleFrame.minX + screenMargin
         let maxX = visibleFrame.maxX - screenMargin - panelSize.width
-        let x = min(max(selectionRect.minX, minX), max(minX, maxX))
+        let minY = visibleFrame.minY + screenMargin
 
         // Preferred: below the selection (panel top sits just under it).
+        let belowX = min(max(selectionRect.minX, minX), max(minX, maxX))
         let belowY = selectionRect.minY - selectionMargin - panelSize.height
-        if belowY >= visibleFrame.minY + screenMargin {
-            return CGPoint(x: x, y: belowY)
+        if belowY >= minY {
+            return CGPoint(x: belowX, y: belowY)
         }
 
-        // Otherwise: above the selection.
-        let aboveY = selectionRect.maxY + selectionMargin
-        if aboveY + panelSize.height <= visibleFrame.maxY - screenMargin {
-            return CGPoint(x: x, y: aboveY)
+        // Beside the selection, top edge aligned with the selection's top so
+        // it reads side-by-side and downward growth stays clear of the text.
+        let besideY = min(
+            max(selectionRect.maxY - panelSize.height, minY),
+            visibleFrame.maxY - screenMargin - panelSize.height
+        )
+        let rightX = selectionRect.maxX + selectionMargin
+        if rightX + panelSize.width <= visibleFrame.maxX - screenMargin {
+            return CGPoint(x: rightX, y: besideY)
+        }
+        let leftX = selectionRect.minX - selectionMargin - panelSize.width
+        if leftX >= minX {
+            return CGPoint(x: leftX, y: besideY)
         }
 
-        // No room on either side: clamp inside the screen (overlap unavoidable).
-        let minY = visibleFrame.minY + screenMargin
-        let maxY = visibleFrame.maxY - screenMargin - panelSize.height
-        let y = min(max(belowY, minY), max(minY, maxY))
-        return CGPoint(x: x, y: y)
+        // No room below or beside: pin to the bottom of the screen (some
+        // overlap with the selection's bottom may be unavoidable, but the
+        // panel still never sits above the text).
+        return CGPoint(x: belowX, y: minY)
     }
 }

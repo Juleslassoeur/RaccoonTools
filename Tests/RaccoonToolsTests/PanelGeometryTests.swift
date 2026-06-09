@@ -54,15 +54,35 @@ import CoreGraphics
         #expect(!panelRect.intersects(selection))
     }
 
-    @Test func panelGoesAboveSelectionWhenNoRoomBelow() {
+    @Test func panelGoesBesideSelectionWhenNoRoomBelow() {
         let selection = CGRect(x: 200, y: 200, width: 300, height: 20)
         let origin = PanelGeometry.panelOrigin(panelSize: panelSize, selectionRect: selection, visibleFrame: visible)
-        // Panel bottom sits just above the selection top
-        #expect(origin.y == selection.maxY + PanelGeometry.selectionMargin)
+        // Never above: the panel sits to the right of the selection instead
+        #expect(origin.x == selection.maxX + PanelGeometry.selectionMargin)
         let panelRect = CGRect(origin: origin, size: panelSize)
         #expect(!panelRect.intersects(selection))
         // Still fully inside the visible frame
         #expect(panelRect.maxY <= visible.maxY)
+        #expect(panelRect.minY >= visible.minY)
+    }
+
+    @Test func panelGoesLeftWhenNoRoomBelowOrRight() {
+        // Selection hugging the right edge: below is too tight, right is off-screen
+        let selection = CGRect(x: 1100, y: 200, width: 300, height: 20)
+        let origin = PanelGeometry.panelOrigin(panelSize: panelSize, selectionRect: selection, visibleFrame: visible)
+        let panelRect = CGRect(origin: origin, size: panelSize)
+        #expect(panelRect.maxX <= selection.minX)
+        #expect(!panelRect.intersects(selection))
+    }
+
+    @Test func panelPinsToBottomNeverAboveWhenNothingFits() {
+        // Full-width selection low on a short screen: below/right/left all fail
+        let shortVisible = CGRect(x: 0, y: 0, width: 1440, height: 600)
+        let tallPanel = CGSize(width: 680, height: 480)
+        let selection = CGRect(x: 0, y: 100, width: 1440, height: 20)
+        let origin = PanelGeometry.panelOrigin(panelSize: tallPanel, selectionRect: selection, visibleFrame: shortVisible)
+        // Pinned to the bottom margin — never placed above the selection
+        #expect(origin.y == shortVisible.minY + PanelGeometry.screenMargin)
     }
 
     @Test func panelClampsInsideScreenWhenNoRoomEitherSide() {

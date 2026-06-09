@@ -104,6 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             state.previousApp = NSWorkspace.shared.frontmostApplication
             state.preGrabbedSelectedText = nil
             state.preGrabbedFocusedElement = nil
+            state.freeTargetIsEditable = true
             pendingSelectionRect = nil
 
             // Grab selected text while previous app is still frontmost.
@@ -142,6 +143,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                    let focused = focRef {
                     let element = focused as! AXUIElement
                     state.preGrabbedFocusedElement = element
+                    state.freeTargetIsEditable = Self.isElementEditable(element)
                     var rangeRef: CFTypeRef?
                     if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
                        let rangeVal = rangeRef {
@@ -175,6 +177,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.showSpotlight()
             }
         }
+    }
+
+    /// Whether the element accepts text edits (so Apply can paste over the
+    /// selection). PDFs, rendered web pages and read-only fields report their
+    /// selection/value as non-settable; Apply then degrades to Copy.
+    static func isElementEditable(_ element: AXUIElement) -> Bool {
+        var settable = DarwinBoolean(false)
+        if AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable) == .success,
+           settable.boolValue {
+            return true
+        }
+        if AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success {
+            return settable.boolValue
+        }
+        // Unknown: assume editable (legacy behavior)
+        return true
     }
 
     /// Screen frame of an AX element (its position/size attributes), converted

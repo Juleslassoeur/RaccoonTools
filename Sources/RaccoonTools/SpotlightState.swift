@@ -140,6 +140,10 @@ class SpotlightState: ObservableObject {
     // Toggle to show/hide original text in free mode header
     @Published var freeShowOriginal = false
 
+    // Whether the focused element the selection came from accepts edits
+    // (false for PDFs, web pages, read-only fields — Apply becomes Copy).
+    // Lifecycle follows preGrabbed*: set at hotkey time, not by reset().
+    @Published var freeTargetIsEditable = true
     // Reference to the app that was frontmost before opening spotlight
     var previousApp: NSRunningApplication?
     // Pre-grabbed from the previous app at hotkey time (before we steal focus)

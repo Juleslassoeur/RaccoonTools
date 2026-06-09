@@ -95,19 +95,22 @@ class SpotlightPanel: NSPanel {
     /// Resize the panel to hug the SwiftUI content, keeping the TOP edge fixed
     /// (the panel grows downward). Animated except on first layout / while hidden.
     private func adjustHeight(toContentHeight contentHeight: CGFloat) {
-        let target = PanelGeometry.clampedHeight(contentHeight)
+        var target = PanelGeometry.clampedHeight(contentHeight)
+
+        // The top edge must NEVER move up (it sits just below the selection in
+        // contextual mode — rising would cover the text being edited). If the
+        // screen bottom limits downward growth, cap the height instead.
+        if let screen = self.screen ?? NSScreen.main {
+            let minY = screen.visibleFrame.minY + PanelGeometry.screenMargin
+            target = min(target, frame.maxY - minY)
+        }
+
         // Avoid feedback loops: only react to meaningful changes
         guard abs(target - frame.height) > 1 else { return }
 
         var newFrame = frame
         newFrame.origin.y = frame.maxY - target  // top edge stays fixed
         newFrame.size.height = target
-
-        // Keep the panel inside the screen if growing downward would push it out
-        if let screen = self.screen ?? NSScreen.main {
-            let minY = screen.visibleFrame.minY + PanelGeometry.screenMargin
-            if newFrame.origin.y < minY { newFrame.origin.y = minY }
-        }
 
         let shouldAnimate = isVisible && hasPerformedInitialLayout
         hasPerformedInitialLayout = true

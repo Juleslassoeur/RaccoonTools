@@ -187,12 +187,12 @@ extension SpotlightView {
                 HStack(spacing: 16) {
                     if hasUnappliedEdit {
                         HStack(spacing: 4) {
-                            Image(systemName: "return")
+                            Image(systemName: state.freeTargetIsEditable ? "return" : "doc.on.doc")
                                 .font(.system(size: 9))
-                            Text("Apply")
+                            Text(state.freeTargetIsEditable ? "Apply" : "Copy")
                                 .font(.caption2.bold())
                         }
-                        .foregroundColor(.green)
+                        .foregroundColor(state.freeTargetIsEditable ? .green : .blue)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             // Don't apply while a response is still streaming
@@ -201,6 +201,7 @@ extension SpotlightView {
                         }
                     }
 
+                    if state.freeTargetIsEditable {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.uturn.backward")
                             .font(.system(size: 9))
@@ -223,6 +224,7 @@ extension SpotlightView {
                             state.freeLastAppliedText = ""
                         }
                     }
+                    }  // if freeTargetIsEditable (Undo is meaningless on read-only sources)
 
                     Spacer()
                 }
@@ -287,7 +289,8 @@ extension SpotlightView {
 
         Task {
             do {
-                let full = try await LLMService.stream(provider: provider, systemPrompt: prompt, messages: messages) { delta in
+                let full = try await LLMService.stream(provider: provider, systemPrompt: prompt, messages: messages,
+                                                       injectResponseLanguage: false) { delta in
                     Task { @MainActor in
                         guard let idx = state.freeMessages.lastIndex(where: { $0.id == placeholderID }) else { return }
                         guard let chunk = decider.ingest(delta) else { return }
@@ -326,7 +329,28 @@ extension SpotlightView {
         }
     }
 
+    /// Copy a free-mode result to the clipboard (used when the source isn't
+    /// editable). Intentional copy: the clipboard is NOT restored afterwards.
+    func copyFreeResult(_ text: String) {
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        state.freeMessages.append(QAMessage(
+            isUser: false,
+            text: "Copied to clipboard — the source text isn't editable here.",
+            source: "info"
+        ))
+    }
+
     func applyFreeEdit() {
+        // Read-only source (PDF, web page, locked field…): replacing the
+        // selection is impossible — copy the result instead.
+        guard state.freeTargetIsEditable else {
+            copyFreeResult(state.freeCurrentText)
+            return
+        }
+
+
         guard let prevApp = state.previousApp else {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(state.freeCurrentText, forType: .string)
@@ -468,6 +492,8 @@ struct FreeEditCardView: View {
 
     /// "Diff" / "Text" toggle on the card; diff is the default when gated in.
     @State private var showDiff = true
+    /// Transient feedback after the Copy button is pressed.
+    @State private var justCopied = false
 
     /// Whether this card is driven by the version history: it must be the
     /// latest edit card AND correspond to the most recent version (tool
@@ -524,7 +550,23 @@ struct FreeEditCardView: View {
                     diffTextToggle
                 }
 
-                if !isApplied {
+                // Copy is always available (and becomes the primary action
+                // when the source text isn't editable)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(displayedText, forType: .string)
+                    justCopied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { justCopied = false }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: justCopied ? "checkmark" : "doc.on.doc").font(.system(size: 8))
+                        Text(justCopied ? "Copied" : "Copy").font(.caption2)
+                    }
+                    .foregroundColor(state.freeTargetIsEditable ? .secondary : .blue)
+                }
+                .buttonStyle(.plain)
+
+                if !isApplied && state.freeTargetIsEditable {
                     Button {
                         onApply(displayedText)
                     } label: {
