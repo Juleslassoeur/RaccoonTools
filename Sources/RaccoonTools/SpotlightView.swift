@@ -263,13 +263,12 @@ struct SpotlightView: View {
             let needsScroll = lineCount > 8
 
             if needsScroll {
-                ScrollView {
+                SelfSizingScrollView(maxHeight: 250) {
                     Text(result)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 250)
             } else {
                 Text(result)
                     .font(.system(.caption, design: .monospaced))
@@ -290,7 +289,10 @@ struct SpotlightView: View {
             let tokens = registry.tokenize(state.input)
             let segments = registry.nextSegments(for: tokens, scores: state.suggestionScores)
             ScrollViewReader { proxy in
-                ScrollView {
+                // Self-sizing: a plain ScrollView with maxHeight is still
+                // compressible and collapses inside the adaptive panel,
+                // leaving a one-row "mask" the user has to scroll inside
+                SelfSizingScrollView(maxHeight: 280) {
                     VStack(spacing: 0) {
                         ForEach(Array(segments.enumerated()), id: \.element.id) { index, seg in
                             segmentRow(seg: seg, index: index)
@@ -299,8 +301,6 @@ struct SpotlightView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                // Hug content when few rows so the panel can stay compact
-                .frame(maxHeight: min(280, CGFloat(max(segments.count, 1)) * 34 + 8))
                 .onChange(of: state.selectedIndex) { idx in
                     withAnimation(.easeOut(duration: 0.1)) {
                         proxy.scrollTo("seg-\(idx)", anchor: .center)
@@ -310,7 +310,7 @@ struct SpotlightView: View {
         } else {
             let suggestions = commandState.suggestions
             ScrollViewReader { proxy in
-                ScrollView {
+                SelfSizingScrollView(maxHeight: 280) {
                     VStack(spacing: 0) {
                         if suggestions.isEmpty {
                             HStack {
@@ -329,8 +329,6 @@ struct SpotlightView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                // Hug content when few rows so the panel can stay compact
-                .frame(maxHeight: min(280, CGFloat(max(suggestions.count, 1)) * 34 + 8))
                 .onChange(of: state.selectedIndex) { idx in
                     withAnimation(.easeOut(duration: 0.1)) {
                         proxy.scrollTo("tool-\(idx)", anchor: .center)
@@ -458,7 +456,7 @@ struct SpotlightView: View {
             Divider()
 
             ScrollViewReader { proxy in
-                ScrollView {
+                SelfSizingScrollView(maxHeight: 280) {
                     VStack(spacing: 0) {
                         ForEach(Array(state.structuredResults.enumerated()), id: \.element.id) { index, option in
                             let isSelected = index == state.resultSelectedIndex
@@ -494,7 +492,6 @@ struct SpotlightView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 280)
                 .onChange(of: state.resultSelectedIndex) { idx in
                     withAnimation(.easeOut(duration: 0.1)) {
                         proxy.scrollTo("opt-\(idx)", anchor: .center)
