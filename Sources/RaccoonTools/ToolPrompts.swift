@@ -88,9 +88,12 @@ enum LLMToolPrompts {
             For QUESTION requests: respond with EXACTLY "ANSWER:" followed by your concise answer.
             Your reply MUST start with "EDIT:" or "ANSWER:" as the very first characters — no preamble.
 
-            When editing, return ONLY the modified text after "EDIT:". No explanations, no commentary.
-            When answering, be concise and helpful.
-            Preserve the original formatting unless asked otherwise.
+            When editing:
+            - Return ONLY the edited text after "EDIT:" — the result must be directly usable as a replacement for the selection.
+            - NEVER add titles, labels, notes, surrounding quotes, or parenthetical annotations like "(English version)" — output the text itself and nothing else.
+            - The output language is dictated by the instruction (e.g. a translation request) or, absent that, by the original text's language. The language the instruction is written in does NOT change the output language.
+            - Preserve the original formatting unless asked otherwise.
+            When answering, be concise and helpful, and answer in the same language as the user's question.
             """,
     ]
 }

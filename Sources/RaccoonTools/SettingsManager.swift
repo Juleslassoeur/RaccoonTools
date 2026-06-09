@@ -1,5 +1,22 @@
 import Foundation
 
+/// A one-click action shown as a chip in contextual (free) mode.
+/// `input` is submitted exactly as if the user had typed it: a tool name
+/// runs that tool, anything else is sent to the AI as an instruction.
+struct QuickAction: Codable, Hashable, Identifiable {
+    var label: String
+    var input: String
+    var id: String { label + "|" + input }
+
+    static let defaults: [QuickAction] = [
+        QuickAction(label: "Fix", input: "fix grammar"),
+        QuickAction(label: "Shorten", input: "make it shorter, keep the meaning"),
+        QuickAction(label: "Rephrase", input: "rephrase this, keep the meaning and tone"),
+        QuickAction(label: "Formal", input: "rephrase formal"),
+        QuickAction(label: "Translate", input: "translate"),
+    ]
+}
+
 class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
 
@@ -31,6 +48,34 @@ class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(defaultResponseLanguage, forKey: "defaultResponseLanguage") }
     }
 
+    // Quick-action chips shown in contextual mode (Cmd+1…9)
+    @Published var quickActions: [QuickAction] {
+        didSet { saveCodable(quickActions, key: "quickActions") }
+    }
+    // Per-app tone rules: bundle identifier -> rule injected into the system
+    // prompt when the contextual mode was invoked from that app
+    @Published var appToneRules: [String: String] {
+        didSet { saveCodable(appToneRules, key: "appToneRules") }
+    }
+    // Instant edit: second hotkey that applies a tool to the selection
+    // without opening the panel
+    @Published var instantEditEnabled: Bool {
+        didSet { UserDefaults.standard.set(instantEditEnabled, forKey: "instantEditEnabled") }
+    }
+    @Published var instantEditToolPath: String {
+        didSet { UserDefaults.standard.set(instantEditToolPath, forKey: "instantEditToolPath") }
+    }
+    @Published var instantEditKeyCode: Int {
+        didSet { UserDefaults.standard.set(instantEditKeyCode, forKey: "instantEditKeyCode") }
+    }
+    @Published var instantEditModifiers: Int {
+        didSet { UserDefaults.standard.set(instantEditModifiers, forKey: "instantEditModifiers") }
+    }
+    // First-launch onboarding
+    @Published var hasCompletedOnboarding: Bool {
+        didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
+    }
+
     // LLM Providers
     @Published var providers: [LLMProviderConfig] {
         didSet { saveProviders() }
@@ -52,6 +97,14 @@ class SettingsManager: ObservableObject {
         self.defaultTranslateTarget = UserDefaults.standard.string(forKey: "defaultTranslateTarget") ?? "en"
         self.globalToneRules = UserDefaults.standard.string(forKey: "globalToneRules") ?? ""
         self.defaultResponseLanguage = UserDefaults.standard.string(forKey: "defaultResponseLanguage") ?? "auto"
+        self.quickActions = Self.loadCodable([QuickAction].self, key: "quickActions") ?? QuickAction.defaults
+        self.appToneRules = Self.loadCodable([String: String].self, key: "appToneRules") ?? [:]
+        self.instantEditEnabled = UserDefaults.standard.object(forKey: "instantEditEnabled") as? Bool ?? false
+        self.instantEditToolPath = UserDefaults.standard.string(forKey: "instantEditToolPath") ?? "fix orth"
+        // Default: Option+Cmd+E (keycode 14), same modifier mask as the main hotkey default
+        self.instantEditKeyCode = UserDefaults.standard.object(forKey: "instantEditKeyCode") as? Int ?? 14
+        self.instantEditModifiers = UserDefaults.standard.object(forKey: "instantEditModifiers") as? Int ?? 0x0900
+        self.hasCompletedOnboarding = UserDefaults.standard.object(forKey: "hasCompletedOnboarding") as? Bool ?? false
 
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         configDir = appSupport.appendingPathComponent("RaccoonTools")
@@ -129,5 +182,18 @@ class SettingsManager: ObservableObject {
     private func saveToolBindings() {
         let file = configDir.appendingPathComponent("toolBindings.json")
         try? JSONEncoder().encode(toolBindings).write(to: file)
+    }
+
+    // MARK: - Codable settings in UserDefaults
+
+    private func saveCodable<T: Encodable>(_ value: T, key: String) {
+        if let data = try? JSONEncoder().encode(value) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    private static func loadCodable<T: Decodable>(_ type: T.Type, key: String) -> T? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
     }
 }

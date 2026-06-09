@@ -116,8 +116,10 @@ class LLMService {
 
     /// Non-streaming multi-turn call. Throws LLMError on any failure.
     static func call(provider: LLMProviderConfig?, systemPrompt: String,
-                     messages: [LLMMessage], maxTokens: Int = 8192) async throws -> String {
-        let (p, system, turns) = try prepare(provider, systemPrompt: systemPrompt, messages: messages)
+                     messages: [LLMMessage], maxTokens: Int = 8192,
+                     injectResponseLanguage: Bool = true) async throws -> String {
+        let (p, system, turns) = try prepare(provider, systemPrompt: systemPrompt, messages: messages,
+                                             injectResponseLanguage: injectResponseLanguage)
         switch p.type {
         case .claude: return try await callClaude(p, system: system, messages: turns, maxTokens: maxTokens)
         case .openai, .custom: return try await callOpenAI(p, system: system, messages: turns)
@@ -130,8 +132,10 @@ class LLMService {
     /// arrives and returns the full accumulated text. Throws LLMError on failure.
     static func stream(provider: LLMProviderConfig?, systemPrompt: String,
                        messages: [LLMMessage], maxTokens: Int = 64000,
+                       injectResponseLanguage: Bool = true,
                        onDelta: @escaping @Sendable (String) -> Void) async throws -> String {
-        let (p, system, turns) = try prepare(provider, systemPrompt: systemPrompt, messages: messages)
+        let (p, system, turns) = try prepare(provider, systemPrompt: systemPrompt, messages: messages,
+                                             injectResponseLanguage: injectResponseLanguage)
         switch p.type {
         case .claude: return try await streamClaude(p, system: system, messages: turns, maxTokens: maxTokens, onDelta: onDelta)
         case .openai, .custom: return try await streamOpenAI(p, system: system, messages: turns, onDelta: onDelta)
@@ -143,7 +147,8 @@ class LLMService {
     // MARK: Shared preparation
 
     private static func prepare(_ provider: LLMProviderConfig?, systemPrompt: String,
-                                messages: [LLMMessage]) throws -> (LLMProviderConfig, String, [LLMMessage]) {
+                                messages: [LLMMessage],
+                                injectResponseLanguage: Bool = true) throws -> (LLMProviderConfig, String, [LLMMessage]) {
         guard let provider else { throw LLMError.noProvider }
         guard !provider.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || provider.type == .ollama else {
             throw LLMError.noAPIKey(provider.name)
@@ -160,12 +165,16 @@ class LLMService {
             fullPrompt += "\n\nIMPORTANT STYLE RULES (always follow these):\n\(toneRules)"
         }
 
-        // Response language
-        let lang = settings.defaultResponseLanguage
-        if lang == "auto" {
-            fullPrompt += "\n\nIMPORTANT: Always answer in the same language as the user's input."
-        } else {
-            fullPrompt += "\n\nIMPORTANT: Always answer in \(lang)."
+        // Response language — skipped for callers whose output language is
+        // dictated by the task itself (e.g. free-mode edits/translations,
+        // where this rule would fight the user's instruction)
+        if injectResponseLanguage {
+            let lang = settings.defaultResponseLanguage
+            if lang == "auto" {
+                fullPrompt += "\n\nIMPORTANT: Always answer in the same language as the user's input."
+            } else {
+                fullPrompt += "\n\nIMPORTANT: Always answer in \(lang)."
+            }
         }
 
         return (provider, fullPrompt, turns)

@@ -18,7 +18,7 @@ extension SpotlightView {
             Divider().padding(.top, 4)
 
             ScrollViewReader { proxy in
-                ScrollView {
+                SelfSizingScrollView(maxHeight: 300) {
                     VStack(spacing: 0) {
                         if state.historyTab == .tools {
                             let commands = Array(history.commandHistory.prefix(30))
@@ -50,7 +50,6 @@ extension SpotlightView {
                         }
                     }
                 }
-                .frame(maxHeight: 300)
                 .onChange(of: state.historySelectedIndex) { idx in
                     withAnimation(.easeOut(duration: 0.1)) {
                         proxy.scrollTo(idx, anchor: .center)
@@ -206,7 +205,7 @@ extension SpotlightView {
             if !state.historyDetailOptions.isEmpty {
                 // Structured view
                 ScrollViewReader { proxy in
-                    ScrollView {
+                    SelfSizingScrollView(maxHeight: 280) {
                         VStack(spacing: 0) {
                             ForEach(Array(state.historyDetailOptions.enumerated()), id: \.element.id) { index, option in
                                 let isSelected = index == state.historyDetailSelectedIndex
@@ -235,21 +234,19 @@ extension SpotlightView {
                             }
                         }
                     }
-                    .frame(maxHeight: 280)
                     .onChange(of: state.historyDetailSelectedIndex) { idx in
                         withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo("hd-\(idx)", anchor: .center) }
                     }
                 }
             } else {
                 // Raw text
-                ScrollView {
+                SelfSizingScrollView(maxHeight: 280) {
                     Text(state.historyDetailEntry?.result ?? "")
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
                 }
-                .frame(maxHeight: 280)
             }
         }
     }

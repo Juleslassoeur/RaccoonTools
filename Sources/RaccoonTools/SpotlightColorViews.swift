@@ -30,7 +30,7 @@ extension SpotlightView {
                 HStack(spacing: 0) {
                     // LEFT: history
                     ScrollViewReader { proxy in
-                        ScrollView {
+                        SelfSizingScrollView(maxHeight: 280) {
                             VStack(spacing: 0) {
                                 ForEach(Array(state.pickedColors.enumerated()), id: \.element.id) { index, color in
                                     let isSelected = index == state.colorSelectedIndex
@@ -71,7 +71,6 @@ extension SpotlightView {
                             }
                         }
                         .frame(width: 220)
-                        .frame(maxHeight: 280)
                         .onChange(of: state.colorSelectedIndex) { idx in
                             withAnimation(.easeOut(duration: 0.1)) {
                                 proxy.scrollTo("color-\(idx)", anchor: .center)

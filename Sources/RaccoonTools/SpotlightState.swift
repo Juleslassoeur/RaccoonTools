@@ -4,6 +4,8 @@ struct RunningTaskInfo: Identifiable {
     let id = UUID()
     let toolName: String
     let startTime: Date
+    // 0.0–1.0 when the underlying process reports parsable progress, nil otherwise
+    var progress: Double? = nil
 }
 
 struct PickedColor: Identifiable {
@@ -119,6 +121,10 @@ class SpotlightState: ObservableObject {
     @Published var freeMessages: [QAMessage] = []
     @Published var freeOriginalText = ""
     @Published var freeCurrentText = ""
+    // Every successful EDIT response is appended here; the user can navigate
+    // versions on the edit card and apply any of them
+    @Published var freeVersions: [String] = []
+    @Published var freeVersionIndex: Int = 0
 
     enum PromptStep { case content, instruction, qa, result }
     @Published var qaMessages: [QAMessage] = []
@@ -134,6 +140,10 @@ class SpotlightState: ObservableObject {
     // Toggle to show/hide original text in free mode header
     @Published var freeShowOriginal = false
 
+    // Whether the focused element the selection came from accepts edits
+    // (false for PDFs, web pages, read-only fields — Apply becomes Copy).
+    // Lifecycle follows preGrabbed*: set at hotkey time, not by reset().
+    @Published var freeTargetIsEditable = true
     // Reference to the app that was frontmost before opening spotlight
     var previousApp: NSRunningApplication?
     // Pre-grabbed from the previous app at hotkey time (before we steal focus)
@@ -143,6 +153,13 @@ class SpotlightState: ObservableObject {
     var freeHasApplied = false
     var freeSelectionStart: Int = 0       // cursor position where the selection began
     var freeLastAppliedText: String = ""  // text currently in the document (for re-selection length)
+
+    // Frecency scores snapshot used for suggestion ordering. Single source of
+    // truth shared by the rendered list AND the arrow/Enter key handler — if
+    // they computed scores independently, a tool run mutating the history
+    // would silently reorder one but not the other and Enter would pick the
+    // wrong tool. Refreshed by the view on appear and on input change.
+    var suggestionScores: [String: Double] = [:]
 
     // Background running tasks (visible in menu bar even when spotlight is closed)
     @Published var runningTasks: [RunningTaskInfo] = []
@@ -182,6 +199,8 @@ class SpotlightState: ObservableObject {
         freeMessages = []
         freeOriginalText = ""
         freeCurrentText = ""
+        freeVersions = []
+        freeVersionIndex = 0
         freeHasApplied = false
         freeLastAppliedText = ""
         appliedMessageIDs = []
@@ -210,6 +229,11 @@ class SpotlightState: ObservableObject {
 
     func removeRunningTask(_ id: UUID) {
         runningTasks.removeAll { $0.id == id }
+    }
+
+    func updateTaskProgress(_ id: UUID, _ progress: Double) {
+        guard let idx = runningTasks.firstIndex(where: { $0.id == id }) else { return }
+        runningTasks[idx].progress = min(max(progress, 0), 1)
     }
 }
 
