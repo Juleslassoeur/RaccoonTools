@@ -87,7 +87,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Grab selected text while previous app is still frontmost.
             // Snapshot the pasteboard first so the synthetic Cmd+C never
             // destroys the user's clipboard.
-            let snapshot = Self.snapshotPasteboard()
+            let snapshot = PasteboardSnapshot.take()
             let clipBefore = NSPasteboard.general.changeCount
             let src = CGEventSource(stateID: .hidSystemState)
             let keyDown = CGEvent(keyboardEventSource: src, virtualKey: 0x08, keyDown: true)
@@ -109,7 +109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 // Restore the user's clipboard and make sure the grab never
                 // shows up in clipboard history
-                Self.restorePasteboard(snapshot)
+                PasteboardSnapshot.restore(snapshot)
                 HistoryManager.shared.ignoreCurrentChange()
 
                 // Capture AX selection position (for apply later)
@@ -130,30 +130,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 state.reset()
                 self.showSpotlight()
             }
-        }
-    }
-
-    // MARK: - Pasteboard snapshot/restore
-
-    /// Copy every item's data for every type so the clipboard can be restored
-    /// after the synthetic Cmd+C selection grab.
-    private static func snapshotPasteboard() -> [NSPasteboardItem] {
-        (NSPasteboard.general.pasteboardItems ?? []).map { item in
-            let copy = NSPasteboardItem()
-            for type in item.types {
-                if let data = item.data(forType: type) {
-                    copy.setData(data, forType: type)
-                }
-            }
-            return copy
-        }
-    }
-
-    private static func restorePasteboard(_ items: [NSPasteboardItem]) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        if !items.isEmpty {
-            pb.writeObjects(items)
         }
     }
 

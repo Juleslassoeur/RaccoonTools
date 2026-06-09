@@ -351,7 +351,9 @@ extension SpotlightView {
         let newText = state.freeCurrentText
         let panel = NSApp.windows.first { $0 is SpotlightPanel }
 
-        // Put new text in clipboard
+        // Put new text in clipboard for the synthetic Cmd+V, snapshotting the
+        // user's clipboard first so it can be restored after the paste lands
+        let clipboardSnapshot = PasteboardSnapshot.take()
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(newText, forType: .string)
 
@@ -393,8 +395,12 @@ extension SpotlightView {
                     down?.post(tap: .cghidEventTap)
                     up?.post(tap: .cghidEventTap)
 
-                    // 5. Re-select new text, show panel, take focus back
+                    // 5. Restore the user's clipboard (the paste has landed by
+                    // now), re-select new text, show panel, take focus back
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        PasteboardSnapshot.restore(clipboardSnapshot)
+                        HistoryManager.shared.ignoreCurrentChange()
+
                         if let element = axElement {
                             var newRange = CFRange(location: state.freeSelectionStart, length: newText.utf16.count)
                             if let rangeValue = AXValueCreate(.cfRange, &newRange) {
