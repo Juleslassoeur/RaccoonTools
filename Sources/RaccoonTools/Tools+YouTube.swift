@@ -11,6 +11,59 @@ import Foundation
     return min(max(pct / 100, 0), 1)
 }
 
+// MARK: - YouTube video id extraction (pure, unit-testable)
+
+func youtubeVideoID(from url: String) -> String? {
+    if let range = url.range(of: #"(?:v=|youtu\.be/|shorts/|embed/|live/)([A-Za-z0-9_-]{11})"#,
+                             options: .regularExpression) {
+        return String(url[range].suffix(11))
+    }
+    if url.range(of: #"^[A-Za-z0-9_-]{11}$"#, options: .regularExpression) != nil {
+        return url
+    }
+    return nil
+}
+
+/// Transcript fetch via youtube-transcript-api (runs in the app's venv):
+/// talks to the timedtext endpoint directly, ~2s instead of a full yt-dlp
+/// extraction. Track choice mirrors chooseSubtitleTrack: manual in a
+/// preferred language > any manual > the original auto-generated track.
+private let transcriptPythonScript = """
+import sys
+from youtube_transcript_api import YouTubeTranscriptApi
+
+video_id, prefs = sys.argv[1], [p for p in sys.argv[2].split(',') if p]
+tracks = list(YouTubeTranscriptApi().list(video_id))
+
+def match(ts, lang):
+    for t in ts:
+        if t.language_code == lang or t.language_code.startswith(lang + '-'):
+            return t
+
+manual = [t for t in tracks if not t.is_generated]
+generated = [t for t in tracks if t.is_generated]
+choice = None
+for p in prefs:
+    choice = match(manual, p)
+    if choice: break
+if not choice and manual: choice = manual[0]
+if not choice:
+    for p in prefs:
+        choice = match(generated, p)
+        if choice: break
+if not choice and generated: choice = generated[0]
+if not choice:
+    print('NO_TRANSCRIPT'); sys.exit(0)
+
+data = choice.fetch()
+snippets = data.snippets if hasattr(data, 'snippets') else data
+print('LANG:%s:%s' % (choice.language_code, 'auto-generated' if choice.is_generated else 'manual'))
+for s in snippets:
+    text = s.text if hasattr(s, 'text') else s['text']
+    if text and text.strip():
+        print(text.strip().replace('\\n', ' '))
+"""
+
 // MARK: - Subtitle track selection (pure, unit-testable)
 
 struct SubtitleTrackChoice: Equatable {
@@ -115,8 +168,41 @@ func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
         parameterName: "url",
         handler: { url in
             guard !url.isEmpty else { return "Error: please provide a YouTube URL" }
-            let (ytdlp, commonArgs) = try await ensureYtDlp()
             let output = settings.outputFolder
+            let prefs = [settings.defaultTranslateTarget, "fr", "en"].filter { !$0.isEmpty }
+
+            // Fast path (~2s): fetch the transcript directly via
+            // youtube-transcript-api instead of a full yt-dlp extraction.
+            if let videoID = youtubeVideoID(from: url), PythonEnv.shared.isReady {
+                do {
+                    let raw = try await shellExec(PythonEnv.shared.pythonPath, args: [
+                        "-W", "ignore", "-c", transcriptPythonScript,
+                        videoID, prefs.joined(separator: ",")
+                    ])
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.hasPrefix("NO_TRANSCRIPT") {
+                        return "No subtitles available for this video (neither manual nor auto-generated)."
+                    }
+                    var lines = trimmed.components(separatedBy: "\n")
+                    var trackDesc = "transcript"
+                    if let first = lines.first, first.hasPrefix("LANG:") {
+                        let parts = first.split(separator: ":")
+                        if parts.count >= 3 { trackDesc = "\(parts[1]), \(parts[2])" }
+                        lines.removeFirst()
+                    }
+                    let text = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty {
+                        let path = "\(output)/youtube-transcript-\(videoID).txt"
+                        try text.write(toFile: path, atomically: true, encoding: .utf8)
+                        return "Transcript (\(trackDesc)) saved to \(path)"
+                    }
+                } catch {
+                    // Fall through to the yt-dlp path below
+                }
+            }
+
+            // Fallback: yt-dlp two-step (list tracks, then download the best)
+            let (ytdlp, commonArgs) = try await ensureYtDlp()
             let taskID = await runningTaskID(for: "get youtube transcript")
 
             // 1) Ask what subtitle tracks actually exist (one request) and

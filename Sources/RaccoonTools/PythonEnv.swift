@@ -13,6 +13,7 @@ class PythonEnv {
         "pyobjc-framework-Quartz",
         "pyobjc-framework-Cocoa",
         "Pillow",
+        "youtube-transcript-api",
     ]
 
     init() {
@@ -27,8 +28,11 @@ class PythonEnv {
     private var markerPath: String { "\(venvDir)/.raccoon_setup_ok" }
 
     var isReady: Bool {
-        FileManager.default.fileExists(atPath: pythonPath)
-            && FileManager.default.fileExists(atPath: markerPath)
+        guard FileManager.default.fileExists(atPath: pythonPath),
+              let marker = try? String(contentsOfFile: markerPath, encoding: .utf8) else { return false }
+        // The marker records what was installed; a mismatch (e.g. a new
+        // required package) triggers a clean rebuild on next launch
+        return marker == requiredPackages.joined(separator: "\n")
     }
 
     /// Setup venv and install packages. Call once at app launch.

@@ -1,6 +1,28 @@
 import Testing
 @testable import RaccoonTools
 
+struct VideoIDTests {
+    @Test func extractsFromWatchURL() {
+        #expect(youtubeVideoID(from: "https://www.youtube.com/watch?v=jNQXAC9IVRw") == "jNQXAC9IVRw")
+        #expect(youtubeVideoID(from: "https://www.youtube.com/watch?v=jNQXAC9IVRw&t=42s") == "jNQXAC9IVRw")
+    }
+
+    @Test func extractsFromShortAndEmbedURLs() {
+        #expect(youtubeVideoID(from: "https://youtu.be/jNQXAC9IVRw") == "jNQXAC9IVRw")
+        #expect(youtubeVideoID(from: "https://www.youtube.com/shorts/jNQXAC9IVRw") == "jNQXAC9IVRw")
+        #expect(youtubeVideoID(from: "https://www.youtube.com/embed/jNQXAC9IVRw?rel=0") == "jNQXAC9IVRw")
+    }
+
+    @Test func acceptsBareVideoID() {
+        #expect(youtubeVideoID(from: "jNQXAC9IVRw") == "jNQXAC9IVRw")
+    }
+
+    @Test func rejectsNonYouTubeInput() {
+        #expect(youtubeVideoID(from: "https://example.com/page") == nil)
+        #expect(youtubeVideoID(from: "not a url") == nil)
+    }
+}
+
 struct SubtitleTrackTests {
     private func json(manual: [String], auto: [String], language: String? = nil) -> String {
         let manualDict = manual.map { "\"\($0)\": []" }.joined(separator: ",")
