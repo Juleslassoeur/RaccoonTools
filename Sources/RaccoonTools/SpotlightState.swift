@@ -4,6 +4,8 @@ struct RunningTaskInfo: Identifiable {
     let id = UUID()
     let toolName: String
     let startTime: Date
+    // 0.0–1.0 when the underlying process reports parsable progress, nil otherwise
+    var progress: Double? = nil
 }
 
 struct PickedColor: Identifiable {
@@ -119,6 +121,10 @@ class SpotlightState: ObservableObject {
     @Published var freeMessages: [QAMessage] = []
     @Published var freeOriginalText = ""
     @Published var freeCurrentText = ""
+    // Every successful EDIT response is appended here; the user can navigate
+    // versions on the edit card and apply any of them
+    @Published var freeVersions: [String] = []
+    @Published var freeVersionIndex: Int = 0
 
     enum PromptStep { case content, instruction, qa, result }
     @Published var qaMessages: [QAMessage] = []
@@ -182,6 +188,8 @@ class SpotlightState: ObservableObject {
         freeMessages = []
         freeOriginalText = ""
         freeCurrentText = ""
+        freeVersions = []
+        freeVersionIndex = 0
         freeHasApplied = false
         freeLastAppliedText = ""
         appliedMessageIDs = []
@@ -210,6 +218,11 @@ class SpotlightState: ObservableObject {
 
     func removeRunningTask(_ id: UUID) {
         runningTasks.removeAll { $0.id == id }
+    }
+
+    func updateTaskProgress(_ id: UUID, _ progress: Double) {
+        guard let idx = runningTasks.firstIndex(where: { $0.id == id }) else { return }
+        runningTasks[idx].progress = min(max(progress, 0), 1)
     }
 }
 
