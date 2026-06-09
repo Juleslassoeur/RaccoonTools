@@ -572,7 +572,9 @@ struct SpotlightView: View {
         }
     }
 
-    private func handleReturn() {
+    // Internal (not private) so the free-mode extension can submit quick-action
+    // chips through the exact same path as a typed Enter.
+    func handleReturn() {
         // Free mode: empty Enter = apply edit, non-empty falls through to tool matching
         if state.showFree {
             let msg = state.input.trimmingCharacters(in: .whitespaces)
@@ -1040,6 +1042,9 @@ struct CommandTextFieldWrapper: NSViewRepresentable {
         // Local event monitor: catches arrow keys reliably at the app level
         context.coordinator.eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak field] event in
             guard let field, field.currentEditor() != nil else { return event }
+
+            // Free-mode shortcuts: ⌘1…⌘9 quick actions, ⌘[ / ⌘] version history
+            if FreeModeKeyHandler.handle(event) { return nil }
 
             switch event.keyCode {
             case 125: // Down

@@ -52,6 +52,14 @@ extension SpotlightView {
 
             Divider()
 
+            // Quick-action chips (hidden while a request is streaming)
+            if !state.isRunning {
+                FreeQuickActionChips { input in
+                    submitFreeInput(input)
+                }
+                Divider()
+            }
+
             // Chat messages
             ZStack(alignment: .top) {
                 ScrollViewReader { proxy in
@@ -71,9 +79,18 @@ extension SpotlightView {
                                     }
                                     .padding(.horizontal, 12)
                                 } else if msg.source == "edit" {
-                                    // Edit card
-                                    freeEditCard(msg: msg)
-                                        .padding(.horizontal, 12)
+                                    // Edit card (word diff + version navigator)
+                                    FreeEditCardView(
+                                        msg: msg,
+                                        isLatestEdit: msg.id == state.freeMessages.last(where: { $0.source == "edit" })?.id,
+                                        onApply: { text in
+                                            // Don't apply while a response is still streaming
+                                            guard !state.isRunning else { return }
+                                            state.freeCurrentText = text
+                                            applyFreeEdit()
+                                        }
+                                    )
+                                    .padding(.horizontal, 12)
                                 } else {
                                     // Answer / info bubble
                                     HStack {
@@ -216,61 +233,21 @@ extension SpotlightView {
                 .background(Color.green.opacity(0.04))
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .freeQuickAction)) { note in
+            if let input = note.object as? String {
+                submitFreeInput(input)
+            }
+        }
     }
 
-    // Edit card for free mode
-    func freeEditCard(msg: QAMessage) -> some View {
-        let isApplied = state.appliedMessageIDs.contains(msg.id)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                if isApplied {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(.green)
-                    Text("Applied")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.green)
-                } else {
-                    Image(systemName: "pencil.circle.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(.accentColor)
-                    Text("Edit")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.accentColor)
-                }
-                Spacer()
-                if !isApplied {
-                    Button {
-                        // Don't apply while a response is still streaming
-                        guard !state.isRunning else { return }
-                        state.freeCurrentText = msg.text
-                        applyFreeEdit()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "return").font(.system(size: 8))
-                            Text("Apply").font(.caption2)
-                        }
-                        .foregroundColor(.green)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            Text(msg.text)
-                .font(.caption)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(isApplied ? Color.green.opacity(0.04) : Color.accentColor.opacity(0.06))
-                .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(isApplied ? Color.green.opacity(0.2) : Color.accentColor.opacity(0.15), lineWidth: 1)
-                )
-        }
-        .padding(8)
-        .background(Color.secondary.opacity(0.03))
-        .cornerRadius(10)
+    /// Submits `input` exactly as if the user had typed it and pressed Enter:
+    /// a tool name runs the tool, anything else goes to the AI.
+    func submitFreeInput(_ input: String) {
+        guard !state.isRunning else { return }
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        state.input = trimmed
+        handleReturn()
     }
 
     func sendFreeMessage(_ message: String) {
@@ -279,7 +256,14 @@ extension SpotlightView {
 
         let settings = SettingsManager.shared
         let toolPath = "free"
-        let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
+        var prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
+        // Per-app tone rule: injected when the selection came from a configured app
+        if let bundleID = state.previousApp?.bundleIdentifier,
+           let rule = settings.appToneRules[bundleID]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !rule.isEmpty {
+            let appName = state.previousApp?.localizedName ?? bundleID
+            prompt += "\n\nAPP-SPECIFIC STYLE RULE (the selected text comes from \(appName)):\n\(rule)"
+        }
         let provider = settings.getProvider(for: toolPath)
         let currentText = state.freeCurrentText
 
@@ -325,6 +309,9 @@ extension SpotlightView {
                         state.freeMessages[idx].source = "edit"
                         // Only a successful EDIT response may reach the apply-to-document path
                         state.freeCurrentText = editedText
+                        // Version history: every successful EDIT becomes a new version
+                        state.freeVersions.append(editedText)
+                        state.freeVersionIndex = state.freeVersions.count - 1
                     case .answer(let answer):
                         state.freeMessages[idx].text = answer
                         state.freeMessages[idx].source = "answer"
@@ -423,4 +410,289 @@ extension SpotlightView {
             }
         }
     }
+}
+
+// MARK: - Quick-action chips
+
+/// Horizontal row of one-click action chips rendered in free mode.
+/// The first 9 show their ⌘1…⌘9 keyboard hint.
+struct FreeQuickActionChips: View {
+    @ObservedObject var settings = SettingsManager.shared
+    let onSubmit: (String) -> Void
+
+    var body: some View {
+        if !settings.quickActions.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(settings.quickActions.enumerated()), id: \.offset) { index, action in
+                        Button {
+                            onSubmit(action.input)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(action.label)
+                                    .font(.caption2)
+                                    .foregroundColor(.primary)
+                                if index < 9 {
+                                    Text("⌘\(index + 1)")
+                                        .font(.system(size: 8, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule().fill(Color.accentColor.opacity(0.08))
+                            )
+                            .overlay(
+                                Capsule().stroke(Color.accentColor.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+            }
+        }
+    }
+}
+
+// MARK: - Edit card
+
+/// Edit card in free mode: shows the edited text — as a word-level diff against
+/// the original when the gating heuristics allow it — plus a version navigator
+/// (‹ v2/3 ›) when several EDIT responses have accumulated.
+struct FreeEditCardView: View {
+    @ObservedObject var state = SpotlightState.shared
+    let msg: QAMessage
+    let isLatestEdit: Bool
+    let onApply: (String) -> Void
+
+    /// "Diff" / "Text" toggle on the card; diff is the default when gated in.
+    @State private var showDiff = true
+
+    /// Whether this card is driven by the version history: it must be the
+    /// latest edit card AND correspond to the most recent version (tool
+    /// results create edit cards without a version entry). While streaming,
+    /// the live text always wins.
+    private var isVersioned: Bool {
+        isLatestEdit && !state.isRunning && msg.text == state.freeVersions.last
+    }
+
+    /// The text this card displays. The versioned (latest) card shows the
+    /// selected version so ‹ › navigation changes what's shown (and applied);
+    /// other cards keep their own text.
+    private var displayedText: String {
+        if isVersioned {
+            let idx = min(max(state.freeVersionIndex, 0), state.freeVersions.count - 1)
+            return state.freeVersions[idx]
+        }
+        return msg.text
+    }
+
+    /// Diff only makes sense for a partial rewording of a long-enough text,
+    /// and never while the response is still streaming.
+    private var diffEligible: Bool {
+        !state.isRunning && DiffEngine.shouldShowDiff(original: state.freeOriginalText, edited: displayedText)
+    }
+
+    var body: some View {
+        let isApplied = state.appliedMessageIDs.contains(msg.id)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if isApplied {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.green)
+                    Text("Applied")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.green)
+                } else {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.accentColor)
+                    Text("Edit")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.accentColor)
+                }
+
+                if isVersioned && state.freeVersions.count > 1 {
+                    versionNavigator
+                }
+
+                Spacer()
+
+                if diffEligible {
+                    diffTextToggle
+                }
+
+                if !isApplied {
+                    Button {
+                        onApply(displayedText)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "return").font(.system(size: 8))
+                            Text("Apply").font(.caption2)
+                        }
+                        .foregroundColor(.green)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Group {
+                if diffEligible && showDiff {
+                    Text(diffAttributedString)
+                } else {
+                    Text(displayedText)
+                }
+            }
+            .font(.caption)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(isApplied ? Color.green.opacity(0.04) : Color.accentColor.opacity(0.06))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isApplied ? Color.green.opacity(0.2) : Color.accentColor.opacity(0.15), lineWidth: 1)
+            )
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.03))
+        .cornerRadius(10)
+    }
+
+    // Compact "‹ v2/3 ›" navigator (also reachable via ⌘[ / ⌘])
+    private var versionNavigator: some View {
+        HStack(spacing: 3) {
+            Button {
+                FreeModeKeyHandler.navigateVersion(-1)
+            } label: {
+                Image(systemName: "chevron.left").font(.system(size: 8, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(state.freeVersionIndex > 0 ? .accentColor : .secondary.opacity(0.4))
+            .disabled(state.freeVersionIndex <= 0)
+
+            Text("v\(min(state.freeVersionIndex, state.freeVersions.count - 1) + 1)/\(state.freeVersions.count)")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.secondary)
+
+            Button {
+                FreeModeKeyHandler.navigateVersion(1)
+            } label: {
+                Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(state.freeVersionIndex < state.freeVersions.count - 1 ? .accentColor : .secondary.opacity(0.4))
+            .disabled(state.freeVersionIndex >= state.freeVersions.count - 1)
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(Color.secondary.opacity(0.08))
+        .cornerRadius(3)
+    }
+
+    // Small "Diff" / "Text" toggle
+    private var diffTextToggle: some View {
+        HStack(spacing: 0) {
+            toggleSegment("Diff", isActive: showDiff) { showDiff = true }
+            toggleSegment("Text", isActive: !showDiff) { showDiff = false }
+        }
+        .background(Color.secondary.opacity(0.08))
+        .cornerRadius(3)
+    }
+
+    private func toggleSegment(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 9, weight: isActive ? .bold : .regular))
+                .foregroundColor(isActive ? .accentColor : .secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(isActive ? Color.accentColor.opacity(0.12) : Color.clear)
+                .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Deletions in red strikethrough, insertions in green, unchanged in secondary
+    private var diffAttributedString: AttributedString {
+        let segments = DiffEngine.diff(original: state.freeOriginalText, edited: displayedText)
+        var result = AttributedString()
+        for (index, segment) in segments.enumerated() {
+            if index > 0 { result += AttributedString(" ") }
+            var piece = AttributedString(segment.text)
+            switch segment.kind {
+            case .equal:
+                piece.foregroundColor = .secondary
+            case .inserted:
+                piece.foregroundColor = .green
+            case .deleted:
+                piece.foregroundColor = .red
+                piece.strikethroughStyle = .single
+            }
+            result += piece
+        }
+        return result
+    }
+}
+
+// MARK: - Free-mode keyboard shortcuts
+
+/// Handles free-mode-only shortcuts from the panel's key event monitor:
+/// ⌘1…⌘9 submit the matching quick-action chip, ⌘[ / ⌘] navigate versions.
+enum FreeModeKeyHandler {
+    /// ANSI key codes for the digit row 1…9.
+    private static let digitKeyCodes: [UInt16: Int] = [
+        18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9,
+    ]
+
+    /// Returns true when the event was consumed.
+    static func handle(_ event: NSEvent) -> Bool {
+        let state = SpotlightState.shared
+        guard state.showFree else { return false }
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard flags == .command else { return false }
+
+        // ⌘1…⌘9 → quick-action chip (disabled while streaming, like the chips)
+        var digit = digitKeyCodes[event.keyCode]
+        if digit == nil,
+           let chars = event.charactersIgnoringModifiers,
+           chars.count == 1, let d = Int(chars), (1...9).contains(d) {
+            digit = d
+        }
+        if let d = digit {
+            let actions = SettingsManager.shared.quickActions
+            if !state.isRunning, d <= min(actions.count, 9) {
+                NotificationCenter.default.post(name: .freeQuickAction, object: actions[d - 1].input)
+            }
+            return true
+        }
+
+        // ⌘[ / ⌘] → version history navigation
+        if let chars = event.charactersIgnoringModifiers {
+            if chars == "[" { navigateVersion(-1); return true }
+            if chars == "]" { navigateVersion(1); return true }
+        }
+        return false
+    }
+
+    /// Moves the selected version; the latest edit card displays it and the
+    /// existing Apply flow applies it (freeCurrentText tracks the selection).
+    static func navigateVersion(_ delta: Int) {
+        let state = SpotlightState.shared
+        guard state.showFree, !state.isRunning, state.freeVersions.count > 1 else { return }
+        let newIndex = min(max(state.freeVersionIndex + delta, 0), state.freeVersions.count - 1)
+        guard newIndex != state.freeVersionIndex else { return }
+        state.freeVersionIndex = newIndex
+        state.freeCurrentText = state.freeVersions[newIndex]
+    }
+}
+
+extension Notification.Name {
+    /// Posted with the quick action's `input` string as the object; the free
+    /// view submits it through the regular Enter path.
+    static let freeQuickAction = Notification.Name("freeQuickAction")
 }

@@ -8,6 +8,8 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gear") }
             LLMProvidersTab()
                 .tabItem { Label("LLM Providers", systemImage: "brain") }
+            FreeModeSettingsTab()
+                .tabItem { Label("Contextual", systemImage: "text.cursor") }
             ToolBindingsTab()
                 .tabItem { Label("Tools", systemImage: "wrench") }
         }
