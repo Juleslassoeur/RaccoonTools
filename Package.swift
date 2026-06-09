@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "RaccoonTools",
             path: "Sources/RaccoonTools"
+        ),
+        .testTarget(
+            name: "RaccoonToolsTests",
+            dependencies: ["RaccoonTools"],
+            path: "Tests/RaccoonToolsTests"
         )
     ]
 )

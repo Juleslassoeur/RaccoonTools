@@ -33,8 +33,8 @@ struct ResultOption: Identifiable {
 struct QAMessage: Identifiable {
     let id = UUID()
     let isUser: Bool
-    let text: String
-    let source: String  // where the LLM found it in the file (empty for user messages)
+    var text: String    // mutable so streaming deltas can update it in place (stable id)
+    var source: String  // where the LLM found it in the file (empty for user messages)
 }
 
 struct PaletteColor: Identifiable {
@@ -75,6 +75,21 @@ class SpotlightState: ObservableObject {
     @Published var paletteColors: [PaletteColor] = []
     @Published var paletteSelectedIndex = 0
     var paletteCache: [String: [PaletteColor]] = [:]
+
+    // Cap for the in-memory caches below. When a cache hits the cap we just
+    // clear it: entries are cheap to recompute (one LLM call) and a session
+    // rarely accumulates this many, so an LRU isn't worth the complexity.
+    private let cacheCap = 100
+
+    func cachePalette(_ colors: [PaletteColor], for key: String) {
+        if paletteCache.count >= cacheCap { paletteCache.removeAll() }
+        paletteCache[key] = colors
+    }
+
+    func cacheLLMResult(_ result: String, for key: String) {
+        if llmCache.count >= cacheCap { llmCache.removeAll() }
+        llmCache[key] = result
+    }
 
     // Structured results (for multi-option LLM tools)
     @Published var structuredResults: [ResultOption] = []
