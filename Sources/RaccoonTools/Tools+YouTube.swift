@@ -1,5 +1,16 @@
 import Foundation
 
+// MARK: - yt-dlp progress parsing (pure, unit-testable)
+
+/// Parses a yt-dlp progress line like "[download]  42.3% of 10.5MiB at ..."
+/// into a 0–1 fraction. Returns nil for any other line.
+@Sendable func parseYtDlpProgress(_ line: String) -> Double? {
+    guard line.contains("[download]") else { return nil }
+    guard let range = line.range(of: #"\d+(\.\d+)?%"#, options: .regularExpression),
+          let pct = Double(line[range].dropLast()) else { return nil }
+    return min(max(pct / 100, 0), 1)
+}
+
 func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
     // ============================================================
     // MARK: - GET tools
@@ -13,10 +24,11 @@ func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
         handler: { url in
             guard !url.isEmpty else { return "Error: please provide a YouTube URL" }
             let ytdlp = try await ensureDep("yt-dlp", brew: "yt-dlp")
+            let taskID = await runningTaskID(for: "get youtube sound")
             return try await shellExec(ytdlp, args: [
                 "-x", "--audio-format", "mp3",
                 "-o", "\(settings.outputFolder)/%(title)s.%(ext)s", url
-            ])
+            ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseYtDlpProgress))
         }
     ))
 
@@ -28,9 +40,10 @@ func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
         handler: { url in
             guard !url.isEmpty else { return "Error: please provide a YouTube URL" }
             let ytdlp = try await ensureDep("yt-dlp", brew: "yt-dlp")
+            let taskID = await runningTaskID(for: "get youtube video")
             return try await shellExec(ytdlp, args: [
                 "-o", "\(settings.outputFolder)/%(title)s.%(ext)s", url
-            ])
+            ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseYtDlpProgress))
         }
     ))
 
@@ -43,13 +56,14 @@ func registerYouTubeTools(registry: ToolRegistry, settings: SettingsManager) {
             guard !url.isEmpty else { return "Error: please provide a YouTube URL" }
             let ytdlp = try await ensureDep("yt-dlp", brew: "yt-dlp")
             let output = settings.outputFolder
+            let taskID = await runningTaskID(for: "get youtube transcript")
 
             // Download subtitles (VTT format)
             let result = try await shellExec(ytdlp, args: [
                 "--write-auto-sub", "--sub-lang", "en",
                 "--skip-download",
                 "-o", "\(output)/%(title)s", url
-            ])
+            ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseYtDlpProgress))
 
             // Convert VTT files to plain .txt
             let fm = FileManager.default

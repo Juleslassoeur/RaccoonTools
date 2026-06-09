@@ -62,6 +62,46 @@ class HistoryManager: ObservableObject {
         save()
     }
 
+    // MARK: - Frecency
+
+    /// Age-based weights for frecency scoring of executed commands.
+    enum FrecencyWeight {
+        static let lastHour: Double = 100
+        static let lastDay: Double = 80
+        static let lastWeek: Double = 30
+        static let older: Double = 10
+
+        static let hour: TimeInterval = 3600
+        static let day: TimeInterval = 86_400
+        static let week: TimeInterval = 7 * 86_400
+    }
+
+    /// Maps toolPath → frecency score. Each history entry contributes a
+    /// weight based on its age; recent uses count much more than old ones.
+    func frecencyScores(now: Date = Date()) -> [String: Double] {
+        Self.frecencyScores(for: commandHistory, now: now)
+    }
+
+    /// Pure scoring over arbitrary entries (unit-testable).
+    static func frecencyScores(for entries: [HistoryEntry], now: Date = Date()) -> [String: Double] {
+        var scores: [String: Double] = [:]
+        for entry in entries {
+            let age = now.timeIntervalSince(entry.date)
+            let weight: Double
+            if age < FrecencyWeight.hour {
+                weight = FrecencyWeight.lastHour
+            } else if age < FrecencyWeight.day {
+                weight = FrecencyWeight.lastDay
+            } else if age < FrecencyWeight.week {
+                weight = FrecencyWeight.lastWeek
+            } else {
+                weight = FrecencyWeight.older
+            }
+            scores[entry.toolPath, default: 0] += weight
+        }
+        return scores
+    }
+
     func addClipboard(_ text: String, isImage: Bool = false) {
         if let last = clipboardHistory.first, last.content == text { return }
         clipboardHistory.insert(ClipboardEntry(content: text, isImage: isImage), at: 0)

@@ -87,8 +87,22 @@ struct RunningTaskRow: View {
             ProcessManager.shared.cancel(task.id)
             SpotlightState.shared.removeRunningTask(task.id)
         } label: {
-            Text("~ \(task.toolName)  [cancel]")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("~ \(task.toolName)\(percentLabel)  [cancel]")
+                if let progress = task.progress {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .controlSize(.small)
+                }
+            }
         }
+    }
+
+    // Menu-style items may flatten custom views, so the percentage is also
+    // part of the label text
+    private var percentLabel: String {
+        guard let progress = task.progress else { return "" }
+        return "  \(Int(progress * 100))%"
     }
 }
 
