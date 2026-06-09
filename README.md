@@ -23,19 +23,26 @@ On first launch, grant **Accessibility** permission in System Settings > Privacy
 
 ### 1. Text selected = contextual mode
 
-Select text in any app, press the hotkey. RaccoonTools captures the selection automatically.
+Select text in any app, press the hotkey. RaccoonTools captures the selection automatically and the panel opens next to it (below or beside the text, never covering it), growing as the response streams in.
 
+- **Quick-action chips** (`Fix`, `Shorten`, `Rephrase`…) — one click or `Cmd+1…9`, configurable in Settings
 - **Type an instruction** ("make it shorter", "translate to spanish") — the AI edits your text
 - **Type a tool name** (`fix grammar`, `rephrase formal`, `synonym`) — the tool runs on the selected text
-- **Enter** = apply the edit back to your document
-- **Undo** button = restore the original text
-- Keep chatting to refine. Chain tools. The whole exchange is a single multi-turn conversation, and responses stream in as they're generated.
+- **Word-level diff** on edit cards (for partial rewordings of longer texts), with a Diff/Text toggle
+- **Version history** — chain instructions, navigate versions with `Cmd+[` / `Cmd+]`, apply any of them
+- **Enter** = apply the edit back to your document; **Undo** = restore the original
+- Read-only sources (PDFs, web pages) are detected: Apply becomes **Copy**, and a Copy button is always available
+- The whole exchange is a single multi-turn conversation, and responses stream in as they're generated
 
 Your clipboard is never clobbered: the selection grab and the apply-edit paste both snapshot and restore whatever you had copied, and neither shows up in the clipboard history.
 
 ### 2. No text selected = tool launcher
 
-Browse and run tools with arrow keys, Tab to autocomplete, Enter to execute.
+Browse and run tools with arrow keys, Tab to autocomplete, Enter to execute. Suggestions are ranked by how often and how recently you use each tool. Long-running tools (downloads, transcriptions) show real progress in the panel and the menu bar.
+
+### 3. Instant edit (optional)
+
+A second hotkey (default `Option+Cmd+E`, off by default — enable in Settings > Instant Edit) applies a tool of your choice (default `fix orth`) to the selection **in place, without opening any window** — just a small ✓ HUD.
 
 ## Tools
 
@@ -83,11 +90,14 @@ Browse and run tools with arrow keys, Tab to autocomplete, Enter to execute.
 | Key | Action |
 |---|---|
 | `Option+Cmd+Space` | Open/close launcher (configurable) |
+| `Option+Cmd+E` | Instant edit on selection (configurable, off by default) |
 | `Enter` | Execute tool / apply edit / send message |
 | `Tab` | Autocomplete tool name |
 | `Arrow Up/Down` | Navigate suggestions |
 | `Arrow Right` | Enter tool folder |
 | `Arrow Left` | Go back / exit chat |
+| `Cmd+1…9` | Quick-action chips (contextual mode) |
+| `Cmd+[` / `Cmd+]` | Navigate edit versions (contextual mode) |
 | `Escape` | Close or go back |
 | Drag & drop | Drop files onto the launcher |
 
@@ -97,9 +107,13 @@ Open from the menu bar icon > Settings.
 
 - **LLM Providers** — Configure Claude (default model `claude-sonnet-4-6`), OpenAI, Gemini, Ollama, or custom OpenAI-compatible endpoints
 - **Tools** — Assign a specific LLM provider and customize the system prompt per tool
+- **Contextual** — Quick-action chips (label + instruction) and per-app tone rules (e.g. Mail → "Always professional")
+- **Instant Edit** — Enable the headless hotkey, pick the tool and the shortcut
 - **Translate** — Default target language, engine (Google CLI or LLM)
 - **Tone & Style Rules** — Global rules injected into every LLM prompt (e.g. "Never use Hey", "Always be formal")
 - **Response Language** — Force LLM to respond in a specific language or auto-detect
+
+A short onboarding (accessibility permission, API key) runs on first launch.
 
 ## Architecture
 
@@ -125,6 +139,13 @@ Sources/RaccoonTools/
   ShellExec.swift            — Shell execution + dependency management
   LLMService.swift           — Claude/OpenAI/Gemini/Ollama API calls (streaming, multi-turn)
   FreeReplyParser.swift      — EDIT/ANSWER reply protocol parsing
+  DiffEngine.swift           — Word-level diff for edit cards
+  InstantEdit.swift          — Headless hotkey edit flow + HUD
+  PanelGeometry.swift        — Adaptive height + contextual placement math
+  SelfSizingScrollView.swift — Content-hugging scroll areas for the adaptive panel
+  MarkdownText.swift         — Markdown rendering with copyable code blocks
+  OnboardingView.swift       — First-launch setup
+  KeyCombo.swift             — Hotkey formatting helpers
   PasteboardSnapshot.swift   — Clipboard snapshot/restore around synthetic copy/paste
   SettingsManager.swift      — Persistent settings
   SettingsView.swift         — Settings UI
