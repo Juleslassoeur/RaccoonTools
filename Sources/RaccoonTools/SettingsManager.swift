@@ -58,9 +58,23 @@ class SettingsManager: ObservableObject {
         try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
 
         // Load providers
+        var needsKeychainMigration = false
         let providersFile = configDir.appendingPathComponent("providers.json")
         if let data = try? Data(contentsOf: providersFile),
-           let loaded = try? JSONDecoder().decode([LLMProviderConfig].self, from: data) {
+           var loaded = try? JSONDecoder().decode([LLMProviderConfig].self, from: data) {
+            for i in loaded.indices {
+                // Auto-migrate: if JSON still has a non-empty apiKey, move it to Keychain
+                let jsonKey = loaded[i].apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !jsonKey.isEmpty {
+                    KeychainHelper.save(account: loaded[i].id, value: jsonKey)
+                    loaded[i].apiKey = ""
+                    needsKeychainMigration = true
+                }
+                // Restore API key from Keychain
+                if let keychainKey = KeychainHelper.read(account: loaded[i].id) {
+                    loaded[i].apiKey = keychainKey
+                }
+            }
             self.providers = loaded
         } else {
             self.providers = [.defaultClaude, .defaultOpenAI, .defaultGemini, .defaultOllama]
@@ -73,6 +87,11 @@ class SettingsManager: ObservableObject {
             self.toolBindings = loaded
         } else {
             self.toolBindings = [:]
+        }
+
+        // Re-save JSON with keys stripped after all properties are initialized
+        if needsKeychainMigration {
+            saveProviders()
         }
     }
 
@@ -94,8 +113,17 @@ class SettingsManager: ObservableObject {
     }
 
     private func saveProviders() {
+        // Save API keys to Keychain and write JSON with keys stripped
+        var stripped = providers
+        for i in stripped.indices {
+            let key = stripped[i].apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty {
+                KeychainHelper.save(account: stripped[i].id, value: key)
+            }
+            stripped[i].apiKey = ""
+        }
         let file = configDir.appendingPathComponent("providers.json")
-        try? JSONEncoder().encode(providers).write(to: file)
+        try? JSONEncoder().encode(stripped).write(to: file)
     }
 
     private func saveToolBindings() {
