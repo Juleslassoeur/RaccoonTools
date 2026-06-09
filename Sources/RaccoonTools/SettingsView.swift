@@ -10,6 +10,8 @@ struct SettingsView: View {
                 .tabItem { Label("LLM Providers", systemImage: "brain") }
             ToolBindingsTab()
                 .tabItem { Label("Tools", systemImage: "wrench") }
+            InstantEditSettingsTab()
+                .tabItem { Label("Instant Edit", systemImage: "bolt") }
         }
         .frame(width: 700, height: 500)
     }
