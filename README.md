@@ -5,7 +5,7 @@ A macOS spotlight-style launcher with built-in tools and a contextual AI writing
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/RaccoonTools.git
+git clone https://github.com/Juleslassoeur/RaccoonTools.git
 cd RaccoonTools
 chmod +x build.sh
 ./build.sh
