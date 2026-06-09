@@ -1762,7 +1762,7 @@ struct SpotlightView: View {
                     state.isRunning = false
                     let colors = parsePaletteColors(result, fallbackHex: color.hex)
                     state.paletteColors = colors
-                    state.paletteCache[key] = colors
+                    state.cachePalette(colors, for: key)
                 }
             } catch {
                 await MainActor.run { state.isRunning = false }
@@ -2214,7 +2214,7 @@ struct SpotlightView: View {
                     state.isRunning = false
                     state.removeRunningTask(taskID)
                     // Cache the result
-                    if tool.usesLLM { state.llmCache[cacheKey] = result }
+                    if tool.usesLLM { state.cacheLLMResult(result, for: cacheKey) }
                     handleToolResult(result, tool: tool)
                 }
             } catch {

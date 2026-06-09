@@ -190,7 +190,15 @@ func registerBuiltinTools() {
 
             if !FileManager.default.fileExists(atPath: modelPath) {
                 let modelURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
-                _ = try await shellExec("/usr/bin/curl", args: ["-L", "-o", modelPath, modelURL])
+                _ = try await shellExec("/usr/bin/curl", args: ["-fL", "-o", modelPath, modelURL])
+                // A failed download can leave a partial/empty file that would
+                // be treated as a valid model forever — verify and clean up
+                let attrs = try? FileManager.default.attributesOfItem(atPath: modelPath)
+                let size = (attrs?[.size] as? Int64) ?? 0
+                if size < 10_000_000 {
+                    try? FileManager.default.removeItem(atPath: modelPath)
+                    return "Error: Whisper model download failed (incomplete file). Check your network connection and try again."
+                }
             }
 
             let baseName = (expandedPath as NSString).lastPathComponent

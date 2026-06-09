@@ -76,6 +76,12 @@ class HistoryManager: ObservableObject {
         save()
     }
 
+    /// Sync the monitor's change count with the pasteboard so the next poll
+    /// ignores changes we made ourselves (e.g. the selection grab + restore).
+    func ignoreCurrentChange() {
+        lastChangeCount = NSPasteboard.general.changeCount
+    }
+
     /// Load an image from a clipboard history entry
     func loadImage(for entry: ClipboardEntry) -> NSImage? {
         guard entry.isImage else { return nil }

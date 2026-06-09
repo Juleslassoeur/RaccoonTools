@@ -22,33 +22,44 @@ class PythonEnv {
         self.pythonPath = "\(dir)/bin/python3"
     }
 
+    /// Written only after a fully successful install; its absence means the
+    /// venv is incomplete and must be rebuilt.
+    private var markerPath: String { "\(venvDir)/.raccoon_setup_ok" }
+
     var isReady: Bool {
         FileManager.default.fileExists(atPath: pythonPath)
+            && FileManager.default.fileExists(atPath: markerPath)
     }
 
     /// Setup venv and install packages. Call once at app launch.
     func setup() async {
         if isReady { return }
 
-        print("[RaccoonTools] Setting up Python venv...")
-
-        // Create venv
+        let fm = FileManager.default
         let sysPython = "/usr/bin/python3"
-        do {
-            _ = try await shellExecRaw(sysPython, args: ["-m", "venv", venvDir])
-        } catch {
-            print("[RaccoonTools] Failed to create venv: \(error)")
+        guard fm.fileExists(atPath: sysPython) else {
+            print("[RaccoonTools] /usr/bin/python3 not found — install the Command Line Tools (`xcode-select --install`) to enable PDF/OCR tools")
             return
         }
 
-        // Install packages
-        let pip = "\(venvDir)/bin/pip3"
+        // A venv without the marker is a leftover from a failed install
+        if fm.fileExists(atPath: venvDir) {
+            try? fm.removeItem(atPath: venvDir)
+        }
+
+        print("[RaccoonTools] Setting up Python venv...")
+
         do {
+            _ = try await shellExecRaw(sysPython, args: ["-m", "venv", venvDir])
+            let pip = "\(venvDir)/bin/pip3"
             _ = try await shellExecRaw(pip, args: ["install", "--upgrade", "pip"])
             _ = try await shellExecRaw(pip, args: ["install"] + requiredPackages)
+            try requiredPackages.joined(separator: "\n")
+                .write(toFile: markerPath, atomically: true, encoding: .utf8)
             print("[RaccoonTools] Python venv ready")
         } catch {
-            print("[RaccoonTools] Failed to install packages: \(error)")
+            print("[RaccoonTools] Python venv setup failed: \(error.localizedDescription) — removing venv, will retry on next launch")
+            try? fm.removeItem(atPath: venvDir)
         }
     }
 
@@ -75,7 +86,12 @@ class PythonEnv {
                     if process.terminationStatus == 0 {
                         continuation.resume(returning: output)
                     } else {
-                        continuation.resume(returning: "Error: \(errOutput.isEmpty ? output : errOutput)")
+                        let message = errOutput.isEmpty ? output : errOutput
+                        continuation.resume(throwing: NSError(
+                            domain: "PythonEnv",
+                            code: Int(process.terminationStatus),
+                            userInfo: [NSLocalizedDescriptionKey: message.trimmingCharacters(in: .whitespacesAndNewlines)]
+                        ))
                     }
                 } catch {
                     continuation.resume(throwing: error)

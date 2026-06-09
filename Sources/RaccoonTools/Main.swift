@@ -84,7 +84,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             state.preGrabbedSelectedText = nil
             state.preGrabbedFocusedElement = nil
 
-            // Grab selected text while previous app is still frontmost
+            // Grab selected text while previous app is still frontmost.
+            // Snapshot the pasteboard first so the synthetic Cmd+C never
+            // destroys the user's clipboard.
+            let snapshot = Self.snapshotPasteboard()
             let clipBefore = NSPasteboard.general.changeCount
             let src = CGEventSource(stateID: .hidSystemState)
             let keyDown = CGEvent(keyboardEventSource: src, virtualKey: 0x08, keyDown: true)
@@ -93,31 +96,64 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             keyUp?.flags = .maskCommand
             keyDown?.post(tap: .cghidEventTap)
             keyUp?.post(tap: .cghidEventTap)
-            usleep(100_000)
 
-            if NSPasteboard.general.changeCount != clipBefore,
-               let text = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !text.isEmpty {
-                state.preGrabbedSelectedText = text
+            // Wait for the copy to land without blocking the main thread
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 100_000_000)
+
+                if NSPasteboard.general.changeCount != clipBefore,
+                   let text = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !text.isEmpty {
+                    state.preGrabbedSelectedText = text
+                }
+
+                // Restore the user's clipboard and make sure the grab never
+                // shows up in clipboard history
+                Self.restorePasteboard(snapshot)
+                HistoryManager.shared.ignoreCurrentChange()
+
+                // Capture AX selection position (for apply later)
+                let systemWide = AXUIElementCreateSystemWide()
+                var focRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focRef) == .success,
+                   let focused = focRef {
+                    state.preGrabbedFocusedElement = (focused as! AXUIElement)
+                    var rangeRef: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+                       let rangeVal = rangeRef {
+                        var range = CFRange(location: 0, length: 0)
+                        AXValueGetValue(rangeVal as! AXValue, .cfRange, &range)
+                        state.freeSelectionStart = range.location
+                    }
+                }
+
+                state.reset()
+                self.showSpotlight()
             }
+        }
+    }
 
-            // Capture AX selection position (for apply later)
-            let systemWide = AXUIElementCreateSystemWide()
-            var focRef: CFTypeRef?
-            if AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focRef) == .success,
-               let focused = focRef {
-                state.preGrabbedFocusedElement = focused as! AXUIElement
-                var rangeRef: CFTypeRef?
-                if AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
-                   let rangeVal = rangeRef {
-                    var range = CFRange(location: 0, length: 0)
-                    AXValueGetValue(rangeVal as! AXValue, .cfRange, &range)
-                    state.freeSelectionStart = range.location
+    // MARK: - Pasteboard snapshot/restore
+
+    /// Copy every item's data for every type so the clipboard can be restored
+    /// after the synthetic Cmd+C selection grab.
+    private static func snapshotPasteboard() -> [NSPasteboardItem] {
+        (NSPasteboard.general.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
                 }
             }
+            return copy
+        }
+    }
 
-            state.reset()
-            showSpotlight()
+    private static func restorePasteboard(_ items: [NSPasteboardItem]) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        if !items.isEmpty {
+            pb.writeObjects(items)
         }
     }
 

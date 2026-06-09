@@ -76,6 +76,21 @@ class SpotlightState: ObservableObject {
     @Published var paletteSelectedIndex = 0
     var paletteCache: [String: [PaletteColor]] = [:]
 
+    // Cap for the in-memory caches below. When a cache hits the cap we just
+    // clear it: entries are cheap to recompute (one LLM call) and a session
+    // rarely accumulates this many, so an LRU isn't worth the complexity.
+    private let cacheCap = 100
+
+    func cachePalette(_ colors: [PaletteColor], for key: String) {
+        if paletteCache.count >= cacheCap { paletteCache.removeAll() }
+        paletteCache[key] = colors
+    }
+
+    func cacheLLMResult(_ result: String, for key: String) {
+        if llmCache.count >= cacheCap { llmCache.removeAll() }
+        llmCache[key] = result
+    }
+
     // Structured results (for multi-option LLM tools)
     @Published var structuredResults: [ResultOption] = []
     @Published var resultSelectedIndex = 0
