@@ -1,5 +1,7 @@
 # RaccoonTools
 
+[![CI](https://github.com/Juleslassoeur/RaccoonTools/actions/workflows/ci.yml/badge.svg)](https://github.com/Juleslassoeur/RaccoonTools/actions/workflows/ci.yml)
+
 A macOS spotlight-style launcher with built-in tools and a contextual AI writing assistant. Select text in any app, press a hotkey, and edit/translate/rephrase/ask questions about it — all without leaving your workflow.
 
 ## Install
@@ -28,6 +30,8 @@ Select text in any app, press the hotkey. RaccoonTools captures the selection au
 - **Enter** = apply the edit back to your document
 - **Undo** button = restore the original text
 - Keep chatting to refine. Chain tools. The whole exchange is a single multi-turn conversation, and responses stream in as they're generated.
+
+Your clipboard is never clobbered: the selection grab and the apply-edit paste both snapshot and restore whatever you had copied, and neither shows up in the clipboard history.
 
 ### 2. No text selected = tool launcher
 
@@ -121,6 +125,7 @@ Sources/RaccoonTools/
   ShellExec.swift            — Shell execution + dependency management
   LLMService.swift           — Claude/OpenAI/Gemini/Ollama API calls (streaming, multi-turn)
   FreeReplyParser.swift      — EDIT/ANSWER reply protocol parsing
+  PasteboardSnapshot.swift   — Clipboard snapshot/restore around synthetic copy/paste
   SettingsManager.swift      — Persistent settings
   SettingsView.swift         — Settings UI
   HistoryManager.swift       — Clipboard & command history
