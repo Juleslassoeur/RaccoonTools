@@ -738,7 +738,7 @@ struct SpotlightView: View {
                                     // Answer / info bubble
                                     HStack {
                                         VStack(alignment: .leading, spacing: 4) {
-                                            if !msg.source.isEmpty && msg.source != "undo" {
+                                            if msg.source == "answer" {
                                                 Text("Answer")
                                                     .font(.system(size: 9, weight: .bold))
                                                     .foregroundColor(.blue)
@@ -839,7 +839,11 @@ struct SpotlightView: View {
                         }
                         .foregroundColor(.green)
                         .contentShape(Rectangle())
-                        .onTapGesture { applyFreeEdit() }
+                        .onTapGesture {
+                            // Don't apply while a response is still streaming
+                            guard !state.isRunning else { return }
+                            applyFreeEdit()
+                        }
                     }
 
                     HStack(spacing: 4) {
@@ -897,6 +901,8 @@ struct SpotlightView: View {
                 Spacer()
                 if !isApplied {
                     Button {
+                        // Don't apply while a response is still streaming
+                        guard !state.isRunning else { return }
                         state.freeCurrentText = msg.text
                         applyFreeEdit()
                     } label: {
@@ -927,45 +933,120 @@ struct SpotlightView: View {
         .cornerRadius(10)
     }
 
+    // MARK: - Streaming LLM helpers
+
+    /// Convert a QA transcript into real LLM turns (skipping local notices/errors).
+    private func llmHistory(_ transcript: [QAMessage], limit: Int) -> [LLMMessage] {
+        transcript.suffix(limit)
+            .filter { $0.source != "error" && $0.source != "undo" }
+            .map { LLMMessage(role: $0.isUser ? .user : .assistant, content: $0.text) }
+    }
+
+    /// Append a placeholder assistant message to a transcript, stream deltas into it,
+    /// and replace it with an error message if the request throws.
+    /// onComplete receives the trimmed full text and the placeholder index.
+    private func streamIntoTranscript(
+        provider: LLMProviderConfig?,
+        systemPrompt: String,
+        messages: [LLMMessage],
+        transcript: ReferenceWritableKeyPath<SpotlightState, [QAMessage]>,
+        onComplete: ((String, Int) -> Void)? = nil
+    ) {
+        state.isRunning = true
+        let placeholder = QAMessage(isUser: false, text: "", source: "")
+        let placeholderID = placeholder.id
+        state[keyPath: transcript].append(placeholder)
+        let state = self.state
+
+        Task {
+            do {
+                let full = try await LLMService.stream(provider: provider, systemPrompt: systemPrompt, messages: messages) { delta in
+                    Task { @MainActor in
+                        guard let idx = state[keyPath: transcript].lastIndex(where: { $0.id == placeholderID }) else { return }
+                        state[keyPath: transcript][idx].text += delta
+                    }
+                }
+                await MainActor.run {
+                    state.isRunning = false
+                    let trimmed = full.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard let idx = state[keyPath: transcript].lastIndex(where: { $0.id == placeholderID }) else { return }
+                    state[keyPath: transcript][idx].text = trimmed
+                    onComplete?(trimmed, idx)
+                }
+            } catch {
+                await MainActor.run {
+                    state.isRunning = false
+                    guard let idx = state[keyPath: transcript].lastIndex(where: { $0.id == placeholderID }) else { return }
+                    state[keyPath: transcript][idx].text = "Error: \(error.localizedDescription)"
+                    state[keyPath: transcript][idx].source = "error"
+                }
+            }
+        }
+    }
+
     private func sendFreeMessage(_ message: String) {
         state.freeMessages.append(QAMessage(isUser: true, text: message, source: ""))
         state.isRunning = true
 
+        let settings = SettingsManager.shared
+        let toolPath = "free"
+        let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
+        let provider = settings.getProvider(for: toolPath)
+        let currentText = state.freeCurrentText
+
+        // Real multi-turn history; assistant turns keep their protocol prefix
+        // and the latest user turn carries the current text
+        var messages: [LLMMessage] = state.freeMessages.suffix(20)
+            .filter { $0.source != "error" && $0.source != "undo" }
+            .map { msg in
+                guard !msg.isUser else { return LLMMessage(role: .user, content: msg.text) }
+                let prefix = msg.source == "edit" ? "EDIT: " : (msg.source == "answer" ? "ANSWER: " : "")
+                return LLMMessage(role: .assistant, content: prefix + msg.text)
+            }
+        if let lastIdx = messages.indices.last, messages[lastIdx].role == .user {
+            messages[lastIdx] = LLMMessage(role: .user, content: "Current text:\n\(currentText)\n\n\(message)")
+        }
+
+        let placeholder = QAMessage(isUser: false, text: "", source: "")
+        let placeholderID = placeholder.id
+        state.freeMessages.append(placeholder)
+        let state = self.state
+        // Buffers deltas until EDIT vs ANSWER is decided, then streams the rest
+        let decider = FreeReplyStreamDecider()
+
         Task {
-            let settings = SettingsManager.shared
-            let toolPath = "free"
-            let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
-            let provider = settings.getProvider(for: toolPath)
-
-            let convContext = state.freeMessages.suffix(20).map { msg in
-                "\(msg.isUser ? "User" : "Assistant"): \(msg.text)"
-            }.joined(separator: "\n")
-
-            let currentText = state.freeCurrentText
-            let userMessage = "Current text:\n\(currentText)\n\nConversation:\n\(convContext)"
-
             do {
-                let result = try await LLMService.call(provider: provider, systemPrompt: prompt, userMessage: userMessage)
+                let full = try await LLMService.stream(provider: provider, systemPrompt: prompt, messages: messages) { delta in
+                    Task { @MainActor in
+                        guard let idx = state.freeMessages.lastIndex(where: { $0.id == placeholderID }) else { return }
+                        guard let chunk = decider.ingest(delta) else { return }
+                        if state.freeMessages[idx].source.isEmpty, let kind = decider.kind {
+                            state.freeMessages[idx].source = (kind == .edit) ? "edit" : "answer"
+                        }
+                        state.freeMessages[idx].text += chunk
+                    }
+                }
                 await MainActor.run {
                     state.isRunning = false
-                    let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-
-                    if trimmed.uppercased().hasPrefix("EDIT:") {
-                        let editedText = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard let idx = state.freeMessages.lastIndex(where: { $0.id == placeholderID }) else { return }
+                    // Final authoritative parse of the complete response
+                    switch FreeReplyParser.parse(full) {
+                    case .edit(let editedText):
+                        state.freeMessages[idx].text = editedText
+                        state.freeMessages[idx].source = "edit"
+                        // Only a successful EDIT response may reach the apply-to-document path
                         state.freeCurrentText = editedText
-                        state.freeMessages.append(QAMessage(isUser: false, text: editedText, source: "edit"))
-                    } else if trimmed.uppercased().hasPrefix("ANSWER:") {
-                        let answer = String(trimmed.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines)
-                        state.freeMessages.append(QAMessage(isUser: false, text: answer, source: "answer"))
-                    } else {
-                        // Fallback: display as-is
-                        state.freeMessages.append(QAMessage(isUser: false, text: trimmed, source: ""))
+                    case .answer(let answer):
+                        state.freeMessages[idx].text = answer
+                        state.freeMessages[idx].source = "answer"
                     }
                 }
             } catch {
                 await MainActor.run {
                     state.isRunning = false
-                    state.freeMessages.append(QAMessage(isUser: false, text: "Error: \(error.localizedDescription)", source: ""))
+                    guard let idx = state.freeMessages.lastIndex(where: { $0.id == placeholderID }) else { return }
+                    state.freeMessages[idx].text = "Error: \(error.localizedDescription)"
+                    state.freeMessages[idx].source = "error"
                 }
             }
         }
@@ -1157,38 +1238,25 @@ struct SpotlightView: View {
             state.input = ""
 
             // Ask LLM if it needs clarification or can proceed
-            state.isRunning = true
-            Task {
-                let settings = SettingsManager.shared
-                let provider = settings.getProvider(for: "prompt")
-                let sysPrompt = """
-                The user gave you content and an instruction. Analyze if you have enough info to proceed.
-                If the instruction is clear enough, respond with ONLY:
-                READY: (then produce the final result directly)
-                If you need clarification, ask ONE short question.
-                """
-                let userMsg = "Content (\(state.promptContent.count) chars):\n\(String(state.promptContent.prefix(4000)))\n\nInstruction: \(state.promptInstruction)"
-                do {
-                    let result = try await LLMService.call(provider: provider, systemPrompt: sysPrompt, userMessage: userMsg)
-                    await MainActor.run {
-                        state.isRunning = false
-                        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if trimmed.uppercased().hasPrefix("READY:") {
-                            // LLM produced the result directly
-                            let finalResult = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
-                            state.promptMessages.append(QAMessage(isUser: false, text: finalResult, source: ""))
-                            state.promptStep = .result
-                        } else {
-                            // LLM asks a question
-                            state.promptMessages.append(QAMessage(isUser: false, text: trimmed, source: ""))
-                            state.promptStep = .qa
-                        }
-                    }
-                } catch {
-                    await MainActor.run {
-                        state.isRunning = false
-                        state.promptMessages.append(QAMessage(isUser: false, text: "Error: \(error.localizedDescription)", source: ""))
-                    }
+            let settings = SettingsManager.shared
+            let provider = settings.getProvider(for: "prompt")
+            let sysPrompt = """
+            The user gave you content and an instruction. Analyze if you have enough info to proceed.
+            If the instruction is clear enough, respond with ONLY:
+            READY: (then produce the final result directly)
+            If you need clarification, ask ONE short question.
+            """
+            let userMsg = "Content (\(state.promptContent.count) chars):\n\(String(state.promptContent.prefix(4000)))\n\nInstruction: \(state.promptInstruction)"
+            streamIntoTranscript(provider: provider, systemPrompt: sysPrompt,
+                                 messages: [LLMMessage(role: .user, content: userMsg)],
+                                 transcript: \.promptMessages) { trimmed, idx in
+                if trimmed.uppercased().hasPrefix("READY:") {
+                    // LLM produced the result directly
+                    state.promptMessages[idx].text = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    state.promptStep = .result
+                } else {
+                    // LLM asks a question
+                    state.promptStep = .qa
                 }
             }
 
@@ -1199,32 +1267,23 @@ struct SpotlightView: View {
                 state.promptMessages.append(QAMessage(isUser: true, text: answer, source: ""))
             }
             state.input = ""
-            state.isRunning = true
 
-            Task {
-                let settings = SettingsManager.shared
-                let provider = settings.getProvider(for: "prompt")
-                let conv = state.promptMessages.map { "\($0.isUser ? "User" : "Assistant"): \($0.text)" }.joined(separator: "\n")
-                let sysPrompt = "You are processing content with user instructions. Based on the conversation, produce the final result. If you still need info, ask ONE question. Otherwise prefix with READY: and give the result."
-                let userMsg = "Content:\n\(String(state.promptContent.prefix(4000)))\n\nConversation:\n\(conv)\n\nUser says: \(answer)"
-                do {
-                    let result = try await LLMService.call(provider: provider, systemPrompt: sysPrompt, userMessage: userMsg)
-                    await MainActor.run {
-                        state.isRunning = false
-                        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if trimmed.uppercased().hasPrefix("READY:") {
-                            let finalResult = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
-                            state.promptMessages.append(QAMessage(isUser: false, text: finalResult, source: ""))
-                            state.promptStep = .result
-                        } else {
-                            state.promptMessages.append(QAMessage(isUser: false, text: trimmed, source: ""))
-                        }
-                    }
-                } catch {
-                    await MainActor.run {
-                        state.isRunning = false
-                        state.promptMessages.append(QAMessage(isUser: false, text: "Error: \(error.localizedDescription)", source: ""))
-                    }
+            let settings = SettingsManager.shared
+            let provider = settings.getProvider(for: "prompt")
+            let sysPrompt = "You are processing content with user instructions. Based on the conversation, produce the final result. If you still need info, ask ONE question. Otherwise prefix with READY: and give the result."
+                + "\n\nContent:\n\(String(state.promptContent.prefix(4000)))"
+            // Real multi-turn history (the content preview stays out — full content is in the system prompt)
+            var messages = state.promptMessages
+                .filter { $0.source != "Content" && $0.source != "error" }
+                .map { LLMMessage(role: $0.isUser ? .user : .assistant, content: $0.text) }
+            if text.isEmpty {
+                messages.append(LLMMessage(role: .user, content: answer))
+            }
+            streamIntoTranscript(provider: provider, systemPrompt: sysPrompt,
+                                 messages: messages, transcript: \.promptMessages) { trimmed, idx in
+                if trimmed.uppercased().hasPrefix("READY:") {
+                    state.promptMessages[idx].text = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    state.promptStep = .result
                 }
             }
 
@@ -1310,30 +1369,15 @@ struct SpotlightView: View {
         guard !message.isEmpty else { return }
 
         state.chatMessages.append(QAMessage(isUser: true, text: message, source: ""))
-        state.isRunning = true
 
-        Task {
-            let settings = SettingsManager.shared
-            let provider = settings.getProvider(for: "chat")
-            let systemPrompt = settings.getSystemPrompt(for: "chat", default: "You are a helpful, concise assistant.")
+        let settings = SettingsManager.shared
+        let provider = settings.getProvider(for: "chat")
+        // Response-language rules are injected globally by LLMService
+        let systemPrompt = settings.getSystemPrompt(for: "chat", default: "You are a helpful, concise assistant.")
+        let messages = llmHistory(state.chatMessages, limit: 20)
 
-            let convContext = state.chatMessages.suffix(20).map { msg in
-                "\(msg.isUser ? "User" : "Assistant"): \(msg.text)"
-            }.joined(separator: "\n")
-
-            do {
-                let result = try await LLMService.call(provider: provider, systemPrompt: systemPrompt + "\n\nIMPORTANT: Always answer in the same language as the user's input.", userMessage: convContext)
-                await MainActor.run {
-                    state.isRunning = false
-                    state.chatMessages.append(QAMessage(isUser: false, text: result.trimmingCharacters(in: .whitespacesAndNewlines), source: ""))
-                }
-            } catch {
-                await MainActor.run {
-                    state.isRunning = false
-                    state.chatMessages.append(QAMessage(isUser: false, text: "Error: \(error.localizedDescription)", source: ""))
-                }
-            }
-        }
+        streamIntoTranscript(provider: provider, systemPrompt: systemPrompt,
+                             messages: messages, transcript: \.chatMessages)
     }
 
     // MARK: - Q&A chat view
@@ -1412,35 +1456,19 @@ struct SpotlightView: View {
         guard !question.isEmpty, !state.qaFileContent.isEmpty else { return }
 
         state.qaMessages.append(QAMessage(isUser: true, text: question, source: ""))
-        state.isRunning = true
 
-        Task {
-            let settings = SettingsManager.shared
-            let toolPath = "file qa"
-            let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
-            let provider = settings.getProvider(for: toolPath)
-            let truncated = truncateForLLM(state.qaFileContent)
+        let settings = SettingsManager.shared
+        let toolPath = "file qa"
+        let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
+        let provider = settings.getProvider(for: toolPath)
+        let truncated = truncateForLLM(state.qaFileContent)
 
-            // Build conversation context
-            let convContext = state.qaMessages.suffix(10).map { msg in
-                "\(msg.isUser ? "User" : "Assistant"): \(msg.text)"
-            }.joined(separator: "\n")
+        // File content lives in the system prompt; the transcript becomes real turns
+        let systemPrompt = "\(prompt)\n\nFile: \((state.qaFilePath as NSString).lastPathComponent)\n\nContent:\n\(truncated)"
+        let messages = llmHistory(state.qaMessages, limit: 10)
 
-            let userMessage = "File: \((state.qaFilePath as NSString).lastPathComponent)\n\nContent:\n\(truncated)\n\nConversation:\n\(convContext)\n\nQuestion: \(question)"
-
-            do {
-                let result = try await LLMService.call(provider: provider, systemPrompt: prompt, userMessage: userMessage)
-                await MainActor.run {
-                    state.isRunning = false
-                    state.qaMessages.append(QAMessage(isUser: false, text: result.trimmingCharacters(in: .whitespacesAndNewlines), source: ""))
-                }
-            } catch {
-                await MainActor.run {
-                    state.isRunning = false
-                    state.qaMessages.append(QAMessage(isUser: false, text: "Error: \(error.localizedDescription)", source: ""))
-                }
-            }
-        }
+        streamIntoTranscript(provider: provider, systemPrompt: systemPrompt,
+                             messages: messages, transcript: \.qaMessages)
     }
 
     // MARK: - Structured result view (multi-option tools)
@@ -1835,7 +1863,7 @@ struct SpotlightView: View {
             let msg = state.input.trimmingCharacters(in: .whitespaces)
             if msg.isEmpty {
                 let hasUnappliedEdit = state.freeMessages.contains { $0.source == "edit" && !state.appliedMessageIDs.contains($0.id) }
-                if hasUnappliedEdit {
+                if hasUnappliedEdit && !state.isRunning {
                     applyFreeEdit()
                 }
                 return

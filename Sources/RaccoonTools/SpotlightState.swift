@@ -33,8 +33,8 @@ struct ResultOption: Identifiable {
 struct QAMessage: Identifiable {
     let id = UUID()
     let isUser: Bool
-    let text: String
-    let source: String  // where the LLM found it in the file (empty for user messages)
+    var text: String    // mutable so streaming deltas can update it in place (stable id)
+    var source: String  // where the LLM found it in the file (empty for user messages)
 }
 
 struct PaletteColor: Identifiable {

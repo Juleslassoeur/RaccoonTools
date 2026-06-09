@@ -87,6 +87,7 @@ enum LLMToolPrompts {
 
             For EDIT requests: respond with EXACTLY "EDIT:" followed by the modified text. Nothing else after EDIT:.
             For QUESTION requests: respond with EXACTLY "ANSWER:" followed by your concise answer.
+            Your reply MUST start with "EDIT:" or "ANSWER:" as the very first characters — no preamble.
 
             When editing, return ONLY the modified text after "EDIT:". No explanations, no commentary.
             When answering, be concise and helpful.
