@@ -157,10 +157,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
 
+                // Most apps don't support AX bounds-for-range; fall back to
+                // the focused element's frame, then the mouse location, so the
+                // panel still opens near the text in contextual mode.
+                if state.preGrabbedSelectedText != nil {
+                    let elementBounds = state.preGrabbedFocusedElement.flatMap {
+                        Self.elementScreenBounds(element: $0)
+                    }
+                    self.pendingSelectionRect = PanelGeometry.anchorRect(
+                        selectionBounds: self.pendingSelectionRect,
+                        elementBounds: elementBounds,
+                        mouseLocation: NSEvent.mouseLocation
+                    )
+                }
+
                 state.reset()
                 self.showSpotlight()
             }
         }
+    }
+
+    /// Screen frame of an AX element (its position/size attributes), converted
+    /// to AppKit bottom-left-origin coordinates.
+    static func elementScreenBounds(element: AXUIElement) -> NSRect? {
+        var posRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let pos = posRef, let size = sizeRef else { return nil }
+
+        var pt = CGPoint.zero
+        var sz = CGSize.zero
+        guard AXValueGetValue(pos as! AXValue, .cgPoint, &pt),
+              AXValueGetValue(size as! AXValue, .cgSize, &sz),
+              sz.width > 0, sz.height > 0 else { return nil }
+
+        guard let primary = NSScreen.screens.first else { return nil }
+        return PanelGeometry.axRectToAppKit(CGRect(origin: pt, size: sz), primaryScreenHeight: primary.frame.height)
     }
 
     /// Query the selection's screen bounds via AX and convert them from

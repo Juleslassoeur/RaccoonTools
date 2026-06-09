@@ -99,4 +99,41 @@ import CoreGraphics
         let centered = PanelGeometry.centeredOrigin(panelSize: panelSize, visibleFrame: visible)
         #expect(origin == centered)
     }
+
+    // MARK: - Anchor fallback chain
+
+    @Test func anchorPrefersSelectionBounds() {
+        let sel = CGRect(x: 100, y: 200, width: 80, height: 18)
+        let el = CGRect(x: 0, y: 0, width: 400, height: 30)
+        let anchor = PanelGeometry.anchorRect(selectionBounds: sel, elementBounds: el, mouseLocation: CGPoint(x: 5, y: 5))
+        #expect(anchor == sel)
+    }
+
+    @Test func anchorFallsBackToSmallElementBounds() {
+        let el = CGRect(x: 50, y: 60, width: 400, height: 30)
+        let anchor = PanelGeometry.anchorRect(selectionBounds: nil, elementBounds: el, mouseLocation: CGPoint(x: 5, y: 5))
+        #expect(anchor == el)
+    }
+
+    @Test func anchorSkipsOversizedElement() {
+        // A whole web area / document view is not a useful anchor
+        let el = CGRect(x: 0, y: 0, width: 1200, height: 800)
+        let mouse = CGPoint(x: 300, y: 400)
+        let anchor = PanelGeometry.anchorRect(selectionBounds: nil, elementBounds: el, mouseLocation: mouse)
+        #expect(anchor.midX == mouse.x + 0.5)
+        #expect(anchor.height == 20)
+    }
+
+    @Test func anchorFallsBackToMouseWhenNothingElse() {
+        let mouse = CGPoint(x: 640, y: 350)
+        let anchor = PanelGeometry.anchorRect(selectionBounds: nil, elementBounds: nil, mouseLocation: mouse)
+        #expect(anchor.origin.x == mouse.x)
+        #expect(anchor.contains(CGPoint(x: mouse.x, y: mouse.y - 1)))
+    }
+
+    @Test func zeroSelectionBoundsUsesFallbacks() {
+        let el = CGRect(x: 50, y: 60, width: 400, height: 30)
+        let anchor = PanelGeometry.anchorRect(selectionBounds: .zero, elementBounds: el, mouseLocation: .zero)
+        #expect(anchor == el)
+    }
 }

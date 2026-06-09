@@ -99,7 +99,7 @@ extension SpotlightView {
             Divider()
 
             ScrollViewReader { proxy in
-                ScrollView {
+                SelfSizingScrollView(maxHeight: 300) {
                     VStack(spacing: 8) {
                         // Show conversation history
                         ForEach(Array(state.promptMessages.enumerated()), id: \.element.id) { index, msg in
@@ -139,7 +139,6 @@ extension SpotlightView {
                     }
                     .padding(.vertical, 8)
                 }
-                .frame(maxHeight: 280)
                 .onChange(of: state.promptMessages.count) { _ in
                     withAnimation {
                         proxy.scrollTo("prompt-\(state.promptMessages.count - 1)", anchor: .bottom)
@@ -255,7 +254,7 @@ extension SpotlightView {
             Divider()
 
             ScrollViewReader { proxy in
-                ScrollView {
+                SelfSizingScrollView(maxHeight: 300) {
                     VStack(spacing: 8) {
                         ForEach(Array(state.chatMessages.enumerated()), id: \.element.id) { index, msg in
                             HStack(alignment: .top, spacing: 0) {
@@ -288,7 +287,6 @@ extension SpotlightView {
                     }
                     .padding(.vertical, 8)
                 }
-                .frame(maxHeight: 280)
                 .onChange(of: state.chatMessages.count) { _ in
                     withAnimation {
                         proxy.scrollTo("chat-\(state.chatMessages.count - 1)", anchor: .bottom)
@@ -336,7 +334,7 @@ extension SpotlightView {
 
             // Chat messages
             ScrollViewReader { proxy in
-                ScrollView {
+                SelfSizingScrollView(maxHeight: 300) {
                     VStack(spacing: 8) {
                         ForEach(Array(state.qaMessages.enumerated()), id: \.element.id) { index, msg in
                             HStack(alignment: .top, spacing: 0) {
@@ -369,7 +367,6 @@ extension SpotlightView {
                     }
                     .padding(.vertical, 8)
                 }
-                .frame(maxHeight: 280)
                 .onChange(of: state.qaMessages.count) { _ in
                     withAnimation {
                         proxy.scrollTo("qa-\(state.qaMessages.count - 1)", anchor: .bottom)

@@ -29,6 +29,25 @@ enum PanelGeometry {
         )
     }
 
+    /// Maximum height for a focused element to be a useful placement anchor —
+    /// larger elements (a whole web area or document view) say nothing about
+    /// where the selected text actually is.
+    static let maxAnchorElementHeight: CGFloat = 220
+
+    /// Best available anchor for contextual placement: the selection bounds
+    /// when the app exposes them, else the focused element's frame when it is
+    /// reasonably small (a text field, not a whole document), else a thin rect
+    /// at the mouse location — the user usually just selected text there.
+    static func anchorRect(selectionBounds: CGRect?, elementBounds: CGRect?, mouseLocation: CGPoint) -> CGRect {
+        if let sel = selectionBounds, sel.width > 0 || sel.height > 0 {
+            return sel
+        }
+        if let el = elementBounds, el.width > 0, el.height > 0, el.height <= maxAnchorElementHeight {
+            return el
+        }
+        return CGRect(x: mouseLocation.x, y: mouseLocation.y - 10, width: 1, height: 20)
+    }
+
     /// Default position: horizontally centered, in the upper third of the screen.
     static func centeredOrigin(panelSize: CGSize, visibleFrame: CGRect) -> CGPoint {
         CGPoint(

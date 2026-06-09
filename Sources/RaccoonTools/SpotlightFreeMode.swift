@@ -34,7 +34,7 @@ extension SpotlightView {
                 }
 
                 if state.freeShowOriginal {
-                    ScrollView {
+                    SelfSizingScrollView(maxHeight: 80) {
                         Text(state.freeOriginalText)
                             .font(.system(.caption, design: .monospaced))
                             .foregroundColor(.secondary)
@@ -42,7 +42,6 @@ extension SpotlightView {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
                     }
-                    .frame(maxHeight: 80)
                     .background(Color.secondary.opacity(0.05))
                     .cornerRadius(6)
                 }
@@ -63,7 +62,7 @@ extension SpotlightView {
             // Chat messages
             ZStack(alignment: .top) {
                 ScrollViewReader { proxy in
-                    ScrollView {
+                    SelfSizingScrollView(maxHeight: 300) {
                         VStack(spacing: 8) {
                             ForEach(Array(state.freeMessages.enumerated()), id: \.element.id) { index, msg in
                                 if msg.isUser {
@@ -130,7 +129,6 @@ extension SpotlightView {
                         .padding(.vertical, 8)
                         .id("free-\(state.freeMessages.count)")
                     }
-                    .frame(maxHeight: 240)
                     .onChange(of: state.freeMessages.count) { _ in
                         withAnimation {
                             proxy.scrollTo("free-\(state.freeMessages.count)", anchor: .bottom)
