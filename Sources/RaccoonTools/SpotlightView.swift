@@ -6,6 +6,8 @@ struct SpotlightView: View {
     @ObservedObject var registry = ToolRegistry.shared
     @ObservedObject var history = HistoryManager.shared
     @State private var isDragOver = false
+    // Frecency scores for suggestion ranking — computed once per input change, not per row
+    @State private var frecencyScores: [String: Double] = [:]
 
     var commandState: CommandState {
         CommandState(input: state.input, registry: registry)
@@ -139,7 +141,11 @@ struct SpotlightView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             : nil
         )
+        .onAppear {
+            frecencyScores = history.frecencyScores()
+        }
         .onChange(of: state.input) { _ in
+            frecencyScores = history.frecencyScores()
             state.selectedIndex = 0
             if state.resultText != nil { state.resultText = nil }
             if state.showStructuredResult { state.showStructuredResult = false }
@@ -185,6 +191,11 @@ struct SpotlightView: View {
 
     // MARK: - Running bar
 
+    /// Progress of the task currently shown in the running bar (nil → spinner only)
+    var runningTaskProgress: Double? {
+        state.runningTasks.last(where: { $0.toolName == state.runningToolName })?.progress
+    }
+
     var runningBar: some View {
         HStack(spacing: 8) {
             ProgressView()
@@ -195,6 +206,15 @@ struct SpotlightView: View {
             Text(state.runningToolName)
                 .font(.system(.caption, design: .monospaced))
                 .fontWeight(.medium)
+            if let progress = runningTaskProgress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+                    .frame(width: 140)
+                Text("\(Int(progress * 100))%")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
             Spacer()
             Button {
                 ProcessManager.shared.cancel()
@@ -269,7 +289,7 @@ struct SpotlightView: View {
     var suggestionsArea: some View {
         if isTreeNavigation {
             let tokens = registry.tokenize(state.input)
-            let segments = registry.nextSegments(for: tokens)
+            let segments = registry.nextSegments(for: tokens, scores: frecencyScores)
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
@@ -539,7 +559,7 @@ struct SpotlightView: View {
         // In tree mode, select the segment
         if isTreeNavigation {
             let tokens = registry.tokenize(state.input)
-            let segments = registry.nextSegments(for: tokens)
+            let segments = registry.nextSegments(for: tokens, scores: frecencyScores)
             if !segments.isEmpty {
                 let idx = min(state.selectedIndex, segments.count - 1)
                 appendSegment(segments[idx])
@@ -558,7 +578,7 @@ struct SpotlightView: View {
         // In tree mode: right arrow enters the selected folder
         if isTreeNavigation {
             let tokens = registry.tokenize(state.input)
-            let segments = registry.nextSegments(for: tokens)
+            let segments = registry.nextSegments(for: tokens, scores: frecencyScores)
             if !segments.isEmpty {
                 let idx = min(state.selectedIndex, segments.count - 1)
                 let seg = segments[idx]
@@ -719,7 +739,7 @@ struct SpotlightView: View {
         // In tree mode, select segment
         if isTreeNavigation {
             let tokens = registry.tokenize(state.input)
-            let segments = registry.nextSegments(for: tokens)
+            let segments = registry.nextSegments(for: tokens, scores: frecencyScores)
             if !segments.isEmpty {
                 let idx = min(state.selectedIndex, segments.count - 1)
                 appendSegment(segments[idx])
@@ -768,7 +788,7 @@ struct SpotlightView: View {
             state.historySelectedIndex = min(state.historySelectedIndex + 1, entries.count - 1)
         } else if isTreeNavigation {
             let tokens = registry.tokenize(state.input)
-            let segments = registry.nextSegments(for: tokens)
+            let segments = registry.nextSegments(for: tokens, scores: frecencyScores)
             state.selectedIndex = min(state.selectedIndex + 1, segments.count - 1)
         } else {
             state.selectedIndex = min(state.selectedIndex + 1, commandState.suggestions.count - 1)
@@ -1181,7 +1201,7 @@ enum SpotlightKeyHandler {
             let isTree = tokens.isEmpty || (state.input.hasSuffix(" ") && registry.allTokensComplete(tokens)
                 && registry.resolve(input: state.input) == nil)
             if isTree {
-                let segments = registry.nextSegments(for: tokens)
+                let segments = registry.nextSegments(for: tokens, scores: HistoryManager.shared.frecencyScores())
                 state.selectedIndex = min(state.selectedIndex + 1, segments.count - 1)
             } else {
                 let cs = CommandState(input: state.input, registry: registry)
@@ -1240,7 +1260,7 @@ enum SpotlightKeyHandler {
             && registry.resolve(input: state.input) == nil)
 
         if isTree {
-            let segments = registry.nextSegments(for: tokens)
+            let segments = registry.nextSegments(for: tokens, scores: HistoryManager.shared.frecencyScores())
             if !segments.isEmpty {
                 let idx = min(state.selectedIndex, segments.count - 1)
                 let seg = segments[idx]

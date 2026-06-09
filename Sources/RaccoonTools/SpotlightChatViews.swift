@@ -53,6 +53,27 @@ extension SpotlightView {
         }
     }
 
+    /// Assistant bubble shared by the prompt, chat and file-QA transcripts.
+    /// Completed responses render as markdown; the message still being
+    /// streamed (last one while running) stays plain text so we don't
+    /// re-parse markdown on every token. Error messages stay plain too.
+    @ViewBuilder
+    func assistantBubble(_ msg: QAMessage, isLast: Bool, maxWidth: CGFloat) -> some View {
+        Group {
+            if msg.source == "error" {
+                Text(msg.text)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            } else {
+                MarkdownText(text: msg.text, isStreaming: state.isRunning && isLast)
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.08))
+        .cornerRadius(8)
+        .frame(maxWidth: maxWidth, alignment: .leading)
+    }
+
     // MARK: - Prompt view (content + instruction + Q&A refinement)
 
     var promptView: some View {
@@ -99,13 +120,7 @@ extension SpotlightView {
                                             .frame(maxWidth: 450, alignment: .trailing)
                                     }
                                 } else {
-                                    Text(msg.text)
-                                        .font(.caption)
-                                        .textSelection(.enabled)
-                                        .padding(8)
-                                        .background(Color.secondary.opacity(0.08))
-                                        .cornerRadius(8)
-                                        .frame(maxWidth: 450, alignment: .leading)
+                                    assistantBubble(msg, isLast: index == state.promptMessages.count - 1, maxWidth: 450)
                                     Spacer()
                                 }
                             }
@@ -253,13 +268,7 @@ extension SpotlightView {
                                         .cornerRadius(8)
                                         .frame(maxWidth: 400, alignment: .trailing)
                                 } else {
-                                    Text(msg.text)
-                                        .font(.caption)
-                                        .textSelection(.enabled)
-                                        .padding(8)
-                                        .background(Color.secondary.opacity(0.08))
-                                        .cornerRadius(8)
-                                        .frame(maxWidth: 400, alignment: .leading)
+                                    assistantBubble(msg, isLast: index == state.chatMessages.count - 1, maxWidth: 400)
                                     Spacer()
                                 }
                             }
@@ -340,13 +349,7 @@ extension SpotlightView {
                                         .cornerRadius(8)
                                         .frame(maxWidth: 400, alignment: .trailing)
                                 } else {
-                                    Text(msg.text)
-                                        .font(.caption)
-                                        .textSelection(.enabled)
-                                        .padding(8)
-                                        .background(Color.secondary.opacity(0.08))
-                                        .cornerRadius(8)
-                                        .frame(maxWidth: 400, alignment: .leading)
+                                    assistantBubble(msg, isLast: index == state.qaMessages.count - 1, maxWidth: 400)
                                     Spacer()
                                 }
                             }

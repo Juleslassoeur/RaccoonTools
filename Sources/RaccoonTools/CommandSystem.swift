@@ -95,7 +95,10 @@ class ToolRegistry: ObservableObject {
 
     /// Returns the unique next-level segments for tree-style navigation.
     /// e.g. tokens=[] → ["get", "history"], tokens=["get"] → ["youtube","transcript","txt"]
-    func nextSegments(for tokens: [String]) -> [SegmentSuggestion] {
+    /// `scores` (toolPath → frecency score) optionally ranks segments by usage;
+    /// a folder's score is the max of its descendants' scores. With empty
+    /// scores the order is unchanged: folders first, then alphabetical.
+    func nextSegments(for tokens: [String], scores: [String: Double] = [:]) -> [SegmentSuggestion] {
         let matches = search(tokens: tokens)
         let depth = tokens.count
         var seen = Set<String>()
@@ -112,11 +115,13 @@ class ToolRegistry: ObservableObject {
             let anyLLM = children.contains { $0.usesLLM }
             let desc = isLeaf ? tool.description : "\(childCount) tool\(childCount > 1 ? "s" : "")"
             let usesLLM = isLeaf ? tool.usesLLM : anyLLM
-            results.append(SegmentSuggestion(segment: segment, description: desc, isLeaf: isLeaf, tool: isLeaf ? tool : nil, usesLLM: usesLLM))
+            let score = children.compactMap { scores[$0.fullPath] }.max() ?? 0
+            results.append(SegmentSuggestion(segment: segment, description: desc, isLeaf: isLeaf, tool: isLeaf ? tool : nil, usesLLM: usesLLM, score: score))
         }
-        // Sort: folders first, then alphabetical
+        // Sort: folders first, then by frecency score, then alphabetical
         return results.sorted { a, b in
             if a.isLeaf != b.isLeaf { return !a.isLeaf } // folders first
+            if a.score != b.score { return a.score > b.score } // higher score first
             return a.segment.lowercased() < b.segment.lowercased()
         }
     }
@@ -192,6 +197,7 @@ struct SegmentSuggestion: Identifiable {
     let isLeaf: Bool
     let tool: ToolCommand?
     let usesLLM: Bool
+    var score: Double = 0  // frecency score used for ranking (0 when unranked)
 }
 
 struct ToolTreeNode: Identifiable {

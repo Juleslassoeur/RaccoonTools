@@ -1,5 +1,20 @@
 import Foundation
 
+// MARK: - whisper-cpp progress parsing (pure, unit-testable)
+
+/// Parses a whisper-cpp `--print-progress` line like
+/// "whisper_print_progress_callback: progress =  15%" into a 0–1 fraction.
+/// Returns nil for any other line (behavior stays indeterminate if whisper
+/// never prints progress).
+@Sendable func parseWhisperProgress(_ line: String) -> Double? {
+    guard line.contains("progress") else { return nil }
+    guard let range = line.range(of: #"progress\s*=\s*\d+(\.\d+)?%"#, options: .regularExpression) else { return nil }
+    let match = line[range]
+    guard let pctRange = match.range(of: #"\d+(\.\d+)?"#, options: .regularExpression),
+          let pct = Double(match[pctRange]) else { return nil }
+    return min(max(pct / 100, 0), 1)
+}
+
 func registerFileTools(registry: ToolRegistry, settings: SettingsManager) {
     // get transcript file (Whisper)
     registry.register(ToolCommand(
@@ -36,10 +51,11 @@ func registerFileTools(registry: ToolRegistry, settings: SettingsManager) {
 
             let baseName = (expandedPath as NSString).lastPathComponent
                 .replacingOccurrences(of: ".", with: "_")
+            let taskID = await runningTaskID(for: "get file transcript")
             let result = try await shellExec(whisper, args: [
                 "-m", modelPath, "-f", expandedPath,
-                "-otxt", "-of", "\(output)/\(baseName)"
-            ])
+                "-otxt", "--print-progress", "-of", "\(output)/\(baseName)"
+            ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseWhisperProgress))
             return result.isEmpty ? "Transcription saved to \(output)/\(baseName).txt" : result
         }
     ))
