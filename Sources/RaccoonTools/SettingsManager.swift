@@ -52,6 +52,11 @@ class SettingsManager: ObservableObject {
     @Published var quickActions: [QuickAction] {
         didSet { saveCodable(quickActions, key: "quickActions") }
     }
+    // The Cmd+1…9 shortcuts can collide with muscle memory (tab switching);
+    // chips stay clickable when this is off
+    @Published var quickActionShortcutsEnabled: Bool {
+        didSet { UserDefaults.standard.set(quickActionShortcutsEnabled, forKey: "quickActionShortcutsEnabled") }
+    }
     // Per-app tone rules: bundle identifier -> rule injected into the system
     // prompt when the contextual mode was invoked from that app
     @Published var appToneRules: [String: String] {
@@ -98,6 +103,7 @@ class SettingsManager: ObservableObject {
         self.globalToneRules = UserDefaults.standard.string(forKey: "globalToneRules") ?? ""
         self.defaultResponseLanguage = UserDefaults.standard.string(forKey: "defaultResponseLanguage") ?? "auto"
         self.quickActions = Self.loadCodable([QuickAction].self, key: "quickActions") ?? QuickAction.defaults
+        self.quickActionShortcutsEnabled = UserDefaults.standard.object(forKey: "quickActionShortcutsEnabled") as? Bool ?? true
         self.appToneRules = Self.loadCodable([String: String].self, key: "appToneRules") ?? [:]
         self.instantEditEnabled = UserDefaults.standard.object(forKey: "instantEditEnabled") as? Bool ?? false
         self.instantEditToolPath = UserDefaults.standard.string(forKey: "instantEditToolPath") ?? "fix orth"

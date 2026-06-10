@@ -27,6 +27,9 @@ struct FreeModeSettingsTab: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Toggle("Enable ⌘1…⌘9 shortcuts while the panel is open (chips stay clickable)", isOn: $settings.quickActionShortcutsEnabled)
+                    .font(.caption)
+
                 ForEach(settings.quickActions.indices, id: \.self) { index in
                     HStack(spacing: 8) {
                         Text(index < 9 ? "⌘\(index + 1)" : "")

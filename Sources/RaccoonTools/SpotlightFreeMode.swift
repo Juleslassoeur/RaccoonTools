@@ -701,6 +701,9 @@ enum FreeModeKeyHandler {
             digit = d
         }
         if let d = digit {
+            // Easy to hit by accident (tab-switching muscle memory) — let the
+            // event through untouched when the shortcuts are disabled
+            guard SettingsManager.shared.quickActionShortcutsEnabled else { return false }
             let actions = SettingsManager.shared.quickActions
             if !state.isRunning, d <= min(actions.count, 9) {
                 NotificationCenter.default.post(name: .freeQuickAction, object: actions[d - 1].input)
