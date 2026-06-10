@@ -1,0 +1,61 @@
+name: Release
+
+# Push a tag (git tag v1.2.3 && git push origin v1.2.3) and this workflow:
+# builds + tests, creates the GitHub Release, and points the Homebrew tap
+# (Juleslassoeur/homebrew-tap) at the new tarball.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        run: |
+          swift build
+          swift test
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+
+      - name: Compute tarball checksum
+        id: tarball
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          sha=$(curl -fsL "$url" | shasum -a 256 | cut -d' ' -f1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew tap
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes"
+
+          git clone git@github.com:Juleslassoeur/homebrew-tap.git tap
+          cd tap
+          sed -i '' -E 's|^  url ".*"$|  url "${{ steps.tarball.outputs.url }}"|' Formula/raccoontools.rb
+          sed -i '' -E 's|^  sha256 ".*"$|  sha256 "${{ steps.tarball.outputs.sha }}"|' Formula/raccoontools.rb
+
+          if git diff --quiet; then
+            echo "Formula already up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "raccoontools ${GITHUB_REF_NAME}"
+          git push
