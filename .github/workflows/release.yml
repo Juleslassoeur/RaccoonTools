@@ -76,6 +76,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # One bottle per macOS version (arm64). When Apple ships a new macOS
+        # and GitHub adds its runner (github.com/actions/runner-images), add
+        # it here and re-tag — until then users on that OS transparently fall
+        # back to building from source (slower, never broken).
         os: [macos-14, macos-15, macos-26]
     runs-on: ${{ matrix.os }}
     steps:
