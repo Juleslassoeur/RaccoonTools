@@ -6,6 +6,18 @@ A macOS spotlight-style launcher with built-in tools and a contextual AI writing
 
 ## Install
 
+### Homebrew (recommended)
+
+```bash
+brew install juleslassoeur/tap/raccoontools
+cp -R "$(brew --prefix)/opt/raccoontools/RaccoonTools.app" /Applications/
+open /Applications/RaccoonTools.app
+```
+
+The app is compiled locally by Homebrew — no Gatekeeper warnings, nothing to unblock.
+
+### From source
+
 ```bash
 git clone https://github.com/Juleslassoeur/RaccoonTools.git
 cd RaccoonTools
