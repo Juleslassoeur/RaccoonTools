@@ -117,7 +117,7 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 14) {
             stepHeader(icon: "key.fill",
                        title: "Connect an LLM",
-                       subtitle: "Pick a provider and paste your API key. It is stored securely in the macOS Keychain.")
+                       subtitle: "Pick a provider and paste your API key. It is stored securely in the macOS Keychain — after app updates, macOS may ask to allow access again: choose \"Always Allow\".")
 
             Picker("Provider", selection: $selectedProviderID) {
                 ForEach(settings.providers) { provider in

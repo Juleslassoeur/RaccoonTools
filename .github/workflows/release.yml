@@ -1,14 +1,22 @@
 name: Release
 
 # Push a tag (git tag v1.2.3 && git push origin v1.2.3) and this workflow:
-# builds + tests, creates the GitHub Release, and points the Homebrew tap
-# (Juleslassoeur/homebrew-tap) at the new tarball.
+# 1. builds + tests, creates the GitHub Release, points the Homebrew tap at
+#    the new tarball;
+# 2. builds prebuilt bottles for recent macOS versions (arm64) and uploads
+#    them to the release, so `brew install` takes seconds instead of
+#    compiling — older/Intel systems transparently fall back to source.
 on:
   push:
     tags: ["v*"]
 
 permissions:
   contents: write
+
+env:
+  HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
 
 jobs:
   release:
@@ -36,7 +44,7 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-      - name: Update Homebrew tap
+      - name: Update Homebrew tap (source url + sha)
         env:
           TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
         run: |
@@ -48,6 +56,9 @@ jobs:
 
           git clone git@github.com:Juleslassoeur/homebrew-tap.git tap
           cd tap
+          # Drop the previous version's bottle block; fresh bottles are merged
+          # back in by the merge-bottles job below
+          sed -i '' '/^  bottle do$/,/^  end$/d' Formula/raccoontools.rb
           sed -i '' -E 's|^  url ".*"$|  url "${{ steps.tarball.outputs.url }}"|' Formula/raccoontools.rb
           sed -i '' -E 's|^  sha256 ".*"$|  sha256 "${{ steps.tarball.outputs.sha }}"|' Formula/raccoontools.rb
 
@@ -59,3 +70,64 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -am "raccoontools ${GITHUB_REF_NAME}"
           git push
+
+  bottle:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Build bottle
+        run: |
+          brew tap juleslassoeur/tap
+          brew install --build-bottle juleslassoeur/tap/raccoontools
+          brew bottle --json \
+            --root-url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
+            juleslassoeur/tap/raccoontools
+          # brew names the local file with a double dash; the published asset
+          # must use the single-dash name brew computes from root_url
+          local=$(jq -r '.[].bottle.tags[].local_filename' raccoontools*.json)
+          remote=$(jq -r '.[].bottle.tags[].filename' raccoontools*.json)
+          mv "$local" "$remote"
+
+      - name: Upload bottle to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" raccoontools-*.bottle.*.tar.gz --clobber -R "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bottle-json-${{ matrix.os }}
+          path: raccoontools*.json
+
+  merge-bottles:
+    needs: bottle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bottle-json-*
+          merge-multiple: true
+
+      - name: Merge bottle blocks into the formula
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          brew tap juleslassoeur/tap
+          brew bottle --merge --write --no-commit raccoontools*.json
+
+          mkdir -p ~/.ssh
+          echo "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes"
+
+          cd "$(brew --repository juleslassoeur/tap)"
+          git remote set-url origin git@github.com:Juleslassoeur/homebrew-tap.git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "raccoontools ${GITHUB_REF_NAME}: add bottles"
+          git push origin HEAD:main

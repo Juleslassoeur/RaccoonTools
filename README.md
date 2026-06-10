@@ -172,6 +172,14 @@ Sources/RaccoonTools/
 
 Unit tests live in `Tests/RaccoonToolsTests` — run them with `swift test`.
 
+## FAQ
+
+**macOS asks to allow Keychain access after an update — is that normal?**
+Yes. Your API keys are stored in the macOS Keychain (never in plain files). RaccoonTools builds are compiled locally rather than signed with a paid Apple certificate, so after an update macOS can't prove the new binary is the same app and asks again before handing it your keys. Choose **Always Allow**. A fresh install never sees this prompt — it only appears on updates, and it's macOS security working as intended.
+
+**Why do I have to copy the app to /Applications myself after `brew install`?**
+Homebrew formulae can't write outside their own prefix. Signed apps ship as casks that install directly into /Applications; going certificate-free means a formula compiled on your machine — one extra `cp`, zero Gatekeeper warnings.
+
 ## License
 
 MIT
