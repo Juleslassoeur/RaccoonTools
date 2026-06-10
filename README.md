@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/Juleslassoeur/RaccoonTools/actions/workflows/ci.yml/badge.svg)](https://github.com/Juleslassoeur/RaccoonTools/actions/workflows/ci.yml)
 
-A macOS spotlight-style launcher with built-in tools and a contextual AI writing assistant. Select text in any app, press a hotkey, and edit/translate/rephrase/ask questions about it — all without leaving your workflow.
+A macOS spotlight-style launcher with built-in tools and a contextual AI writing assistant. Select text in any app, press a hotkey, and edit/translate/rephrase/ask questions about it — all without leaving your workflow. Works with any model: Claude, OpenAI, Gemini, or fully local via Ollama.
+
+![RaccoonTools demo — select text, fix it with one click, refine it, apply it in place](docs/demo.gif)
 
 ## Install
 
