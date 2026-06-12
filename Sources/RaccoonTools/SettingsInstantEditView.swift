@@ -6,14 +6,6 @@ import Carbon
 struct InstantEditSettingsTab: View {
     @ObservedObject var settings = SettingsManager.shared
     @ObservedObject var registry = ToolRegistry.shared
-    @State private var selectedShortcut = 0
-
-    static let shortcutPresets: [(String, UInt32, UInt32)] = [
-        ("⌥⌘ E", UInt32(kVK_ANSI_E), UInt32(optionKey | cmdKey)),
-        ("⌃⌘ E", UInt32(kVK_ANSI_E), UInt32(controlKey | cmdKey)),
-        ("⌥⌘ I", UInt32(kVK_ANSI_I), UInt32(optionKey | cmdKey)),
-        ("⌃⌥ F", UInt32(kVK_ANSI_F), UInt32(controlKey | optionKey)),
-    ]
 
     /// LLM tools that take a single text parameter (plus translate).
     var instantEditTools: [ToolCommand] {
@@ -46,27 +38,27 @@ struct InstantEditSettingsTab: View {
             }
 
             Section("Keyboard Shortcut") {
-                Picker("Instant edit", selection: $selectedShortcut) {
-                    ForEach(0..<Self.shortcutPresets.count, id: \.self) { i in
-                        Text(Self.shortcutPresets[i].0).tag(i)
+                HStack {
+                    Text("Instant edit")
+                    Spacer()
+                    ShortcutRecorderField(
+                        keyCode: $settings.instantEditKeyCode,
+                        modifiers: $settings.instantEditModifiers
+                    ) {
+                        NotificationCenter.default.post(name: .instantEditHotkeyChanged, object: nil)
                     }
+                    .disabled(!settings.instantEditEnabled)
                 }
-                .disabled(!settings.instantEditEnabled)
-                .onChange(of: selectedShortcut) { idx in
-                    let preset = Self.shortcutPresets[idx]
-                    settings.instantEditKeyCode = Int(preset.1)
-                    settings.instantEditModifiers = Int(preset.2)
-                    NotificationCenter.default.post(name: .instantEditHotkeyChanged, object: nil)
+                if settings.instantEditEnabled,
+                   settings.hotKeyCode == settings.instantEditKeyCode,
+                   settings.hotKeyModifiers == settings.instantEditModifiers {
+                    Text("⚠︎ Same combination as the launcher shortcut — change one of them.")
+                        .font(.caption).foregroundColor(.orange)
                 }
-                Text("Current: \(KeyComboFormatter.string(keyCode: settings.instantEditKeyCode, modifiers: settings.instantEditModifiers))")
+                Text("Click the field, then press any combination you want (must include ⌘, ⌃ or ⌥). Applies immediately.")
                     .font(.caption).foregroundColor(.secondary)
             }
         }
         .padding(20)
-        .onAppear {
-            let code = UInt32(settings.instantEditKeyCode)
-            let mods = UInt32(settings.instantEditModifiers)
-            selectedShortcut = Self.shortcutPresets.firstIndex { $0.1 == code && $0.2 == mods } ?? 0
-        }
     }
 }

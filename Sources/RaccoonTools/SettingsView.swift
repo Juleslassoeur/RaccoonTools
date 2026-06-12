@@ -57,30 +57,27 @@ struct SettingsView: View {
 
 struct GeneralSettingsTab: View {
     @ObservedObject var settings = SettingsManager.shared
-    @State private var selectedShortcut = 0
-
-    static let shortcutPresets: [(String, UInt32, UInt32)] = [
-        ("⌥⌘ Space", UInt32(kVK_Space), UInt32(optionKey | cmdKey)),
-        ("⌃⌘ Space", UInt32(kVK_Space), UInt32(controlKey | cmdKey)),
-        ("⌥⇧ Space", UInt32(kVK_Space), UInt32(optionKey | shiftKey)),
-        ("⌃⌥ R", UInt32(kVK_ANSI_R), UInt32(controlKey | optionKey)),
-    ]
 
     var body: some View {
         Form {
             Section("Keyboard Shortcut") {
-                Picker("Open Launcher", selection: $selectedShortcut) {
-                    ForEach(0..<Self.shortcutPresets.count, id: \.self) { i in
-                        Text(Self.shortcutPresets[i].0).tag(i)
+                HStack {
+                    Text("Open Launcher")
+                    Spacer()
+                    ShortcutRecorderField(
+                        keyCode: $settings.hotKeyCode,
+                        modifiers: $settings.hotKeyModifiers
+                    ) {
+                        NotificationCenter.default.post(name: .hotkeyChanged, object: nil)
                     }
                 }
-                .onChange(of: selectedShortcut) { idx in
-                    let p = Self.shortcutPresets[idx]
-                    settings.hotKeyCode = Int(p.1)
-                    settings.hotKeyModifiers = Int(p.2)
-                    NotificationCenter.default.post(name: .hotkeyChanged, object: nil)
+                if settings.instantEditEnabled,
+                   settings.hotKeyCode == settings.instantEditKeyCode,
+                   settings.hotKeyModifiers == settings.instantEditModifiers {
+                    Text("⚠︎ Same combination as the Instant Edit shortcut — change one of them.")
+                        .font(.caption).foregroundColor(.orange)
                 }
-                Text("Restart app after changing shortcut.")
+                Text("Click the field, then press any combination you want (must include ⌘, ⌃ or ⌥). Applies immediately.")
                     .font(.caption).foregroundColor(.secondary)
             }
 
@@ -164,11 +161,6 @@ struct GeneralSettingsTab: View {
             }
         }
         .padding(20)
-        .onAppear {
-            let code = UInt32(settings.hotKeyCode)
-            let mods = UInt32(settings.hotKeyModifiers)
-            selectedShortcut = Self.shortcutPresets.firstIndex { $0.1 == code && $0.2 == mods } ?? 0
-        }
     }
 }
 
