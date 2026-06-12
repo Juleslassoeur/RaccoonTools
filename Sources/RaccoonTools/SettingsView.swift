@@ -50,6 +50,14 @@ struct GeneralSettingsTab: View {
                     .font(.caption).foregroundColor(.secondary)
             }
 
+            Section("Grammar & spelling (fix grammar / fix orth)") {
+                Picker("Engine", selection: $settings.grammarEngine) {
+                    Text("LLM (configure in Tools tab)").tag("llm")
+                    Text("LanguageTool — free API, no key, faster (falls back to LLM on error)").tag("languagetool")
+                }
+                .pickerStyle(.radioGroup)
+            }
+
             Section("Translate") {
                 Picker("Engine", selection: $settings.translateMode) {
                     Text("Google Translate (CLI)").tag("cli")

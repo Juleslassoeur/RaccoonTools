@@ -491,6 +491,9 @@ struct FreeEditCardView: View {
     @State private var showDiff = true
     /// Transient feedback after the Copy button is pressed.
     @State private var justCopied = false
+    /// Manual touch-up of the AI's proposal before applying.
+    @State private var isEditingManually = false
+    @State private var manualDraft = ""
 
     /// Whether this card is driven by the version history: it must be the
     /// latest edit card AND correspond to the most recent version (tool
@@ -547,6 +550,45 @@ struct FreeEditCardView: View {
                     diffTextToggle
                 }
 
+                // Manual touch-up of the proposal before applying
+                if isLatestEdit && !isApplied && !state.isRunning {
+                    if isEditingManually {
+                        Button {
+                            isEditingManually = false
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "xmark").font(.system(size: 8))
+                                Text("Cancel").font(.caption2)
+                            }
+                            .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            commitManualEdit()
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "checkmark").font(.system(size: 8))
+                                Text("Done").font(.caption2)
+                            }
+                            .foregroundColor(.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button {
+                            manualDraft = displayedText
+                            isEditingManually = true
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "pencil").font(.system(size: 8))
+                                Text("Edit").font(.caption2)
+                            }
+                            .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
                 // Copy is always available (and becomes the primary action
                 // when the source text isn't editable)
                 Button {
@@ -578,7 +620,12 @@ struct FreeEditCardView: View {
             }
 
             Group {
-                if diffEligible && showDiff {
+                if isEditingManually {
+                    TextEditor(text: $manualDraft)
+                        .font(.caption)
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 60, maxHeight: 180)
+                } else if diffEligible && showDiff {
                     Text(diffAttributedString)
                 } else {
                     Text(displayedText)
@@ -639,6 +686,20 @@ struct FreeEditCardView: View {
         }
         .background(Color.secondary.opacity(0.08))
         .cornerRadius(3)
+    }
+
+    /// Registers the manual touch-up as a new version (so ‹ › navigation and
+    /// Apply pick it up) and keeps the card's message in sync.
+    private func commitManualEdit() {
+        let newText = manualDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingManually = false
+        guard !newText.isEmpty, newText != displayedText else { return }
+        state.freeVersions.append(newText)
+        state.freeVersionIndex = state.freeVersions.count - 1
+        state.freeCurrentText = newText
+        if let idx = state.freeMessages.firstIndex(where: { $0.id == msg.id }) {
+            state.freeMessages[idx].text = newText
+        }
     }
 
     private func toggleSegment(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {

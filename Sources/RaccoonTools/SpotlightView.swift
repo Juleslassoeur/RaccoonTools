@@ -897,21 +897,39 @@ struct SpotlightView: View {
             return
         }
 
-        // Special: file Q&A
+        // Special: file Q&A — extract readable text first (PDF, docx, images
+        // and audio/video are supported via the shared extractor)
         if tool.fullPath == "file qa" {
             let filePath = state.droppedFilePath ?? param.trimmingCharacters(in: .whitespaces)
             let expanded = (filePath as NSString).expandingTildeInPath
-            guard FileManager.default.fileExists(atPath: expanded),
-                  let data = FileManager.default.contents(atPath: expanded),
-                  let content = String(data: data, encoding: .utf8) else {
+            guard FileManager.default.fileExists(atPath: expanded) else {
                 state.resultText = "Error: drag & drop a file first"
                 return
             }
-            state.qaFilePath = expanded
-            state.qaFileContent = content
-            state.qaMessages = []
-            state.showQA = true
-            state.input = ""
+            state.isRunning = true
+            state.runningToolName = "file qa"
+            Task {
+                do {
+                    let content = try await extractFileText(path: expanded, taskLabel: "file qa")
+                    await MainActor.run {
+                        state.isRunning = false
+                        guard !content.isEmpty else {
+                            state.resultText = "Error: no readable text in this file"
+                            return
+                        }
+                        state.qaFilePath = expanded
+                        state.qaFileContent = content
+                        state.qaMessages = []
+                        state.showQA = true
+                        state.input = ""
+                    }
+                } catch {
+                    await MainActor.run {
+                        state.isRunning = false
+                        state.resultText = "Error: \(error.localizedDescription)"
+                    }
+                }
+            }
             return
         }
 

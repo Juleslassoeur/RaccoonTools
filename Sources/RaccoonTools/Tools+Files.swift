@@ -31,23 +31,7 @@ func registerFileTools(registry: ToolRegistry, settings: SettingsManager) {
                 return "Error: file not found at \(expandedPath)"
             }
 
-            let modelDir = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".cache/whisper").path
-            try? FileManager.default.createDirectory(atPath: modelDir, withIntermediateDirectories: true)
-            let modelPath = "\(modelDir)/ggml-base.bin"
-
-            if !FileManager.default.fileExists(atPath: modelPath) {
-                let modelURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
-                _ = try await shellExec("/usr/bin/curl", args: ["-fL", "-o", modelPath, modelURL])
-                // A failed download can leave a partial/empty file that would
-                // be treated as a valid model forever — verify and clean up
-                let attrs = try? FileManager.default.attributesOfItem(atPath: modelPath)
-                let size = (attrs?[.size] as? Int64) ?? 0
-                if size < 10_000_000 {
-                    try? FileManager.default.removeItem(atPath: modelPath)
-                    return "Error: Whisper model download failed (incomplete file). Check your network connection and try again."
-                }
-            }
+            let modelPath = try await ensureWhisperModel()
 
             let baseName = (expandedPath as NSString).lastPathComponent
                 .replacingOccurrences(of: ".", with: "_")
@@ -67,13 +51,8 @@ func registerFileTools(registry: ToolRegistry, settings: SettingsManager) {
         parameterName: "url",
         handler: { url in
             guard !url.isEmpty else { return "Error: please provide a URL" }
-            let result = try await shellExec("/usr/bin/curl", args: ["-sL", url])
-            let text = result
-                .replacingOccurrences(of: "<script[^>]*>[\\s\\S]*?</script>", with: "", options: .regularExpression)
-                .replacingOccurrences(of: "<style[^>]*>[\\s\\S]*?</style>", with: "", options: .regularExpression)
-                .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-                .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let result = try await shellExec("/usr/bin/curl", args: ["-sL", "--max-time", "15", url])
+            let text = stripHTML(result)
             let filename = URL(string: url)?.host ?? "page"
             let outputPath = "\(settings.outputFolder)/\(filename).txt"
             try text.write(toFile: outputPath, atomically: true, encoding: .utf8)
@@ -105,54 +84,8 @@ func registerFileTools(registry: ToolRegistry, settings: SettingsManager) {
         parameterName: "file",
         handler: { filePath in
             guard !filePath.isEmpty else { return "Error: drag & drop a file" }
-            let p = (filePath.trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath
-            guard FileManager.default.fileExists(atPath: p) else { return "Error: file not found" }
-
-            let ext = (p as NSString).pathExtension.lowercased()
-            if ext == "pdf" {
-                // Use macOS built-in PDFKit via python
-                let script = "import sys; from Quartz import PDFDocument; from Foundation import NSURL; d=PDFDocument.alloc().initWithURL_(NSURL.fileURLWithPath_(sys.argv[1])); print(''.join([d.pageAtIndex_(i).string() or '' for i in range(d.pageCount())]))"
-                let text = try await shellExec(PythonEnv.shared.pythonPath, args: ["-c", script, p])
-                return text.trimmingCharacters(in: .whitespacesAndNewlines)
-            } else if ext == "docx" {
-                // Extract text from docx via python zipfile
-                let script = """
-                import zipfile, xml.etree.ElementTree as ET, sys
-                z=zipfile.ZipFile(sys.argv[1])
-                xml=z.read('word/document.xml')
-                root=ET.fromstring(xml)
-                ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
-                print('\\n'.join([''.join([t.text or '' for t in p.findall('.//w:t',ns)]) for p in root.findall('.//w:p',ns)]))
-                """
-                let text = try await shellExec(PythonEnv.shared.pythonPath, args: ["-c", script, p])
-                return text.trimmingCharacters(in: .whitespacesAndNewlines)
-            } else if ["jpg", "jpeg", "png", "tiff", "bmp", "gif", "heic", "webp"].contains(ext) {
-                // OCR via macOS Vision framework
-                let script = """
-                import sys, objc
-                from Foundation import NSURL
-                import Vision, Quartz
-                url = NSURL.fileURLWithPath_(sys.argv[1])
-                src = Quartz.CGImageSourceCreateWithURL(url, None)
-                if not src: print("Error: cannot open image"); sys.exit(1)
-                img = Quartz.CGImageSourceCreateImageAtIndex(src, 0, None)
-                req = Vision.VNRecognizeTextRequest.alloc().init()
-                req.setRecognitionLevel_(1)
-                handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(img, None)
-                handler.performRequests_error_([req], None)
-                for obs in req.results() or []:
-                    print(obs.topCandidates_(1)[0].string())
-                """
-                let text = try await shellExec(PythonEnv.shared.pythonPath, args: ["-c", script, p])
-                let result = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return result.isEmpty ? "No text found in image" : result
-            } else {
-                // Plain text
-                guard let text = try? String(contentsOfFile: p, encoding: .utf8) else {
-                    return "Error: could not read file as text"
-                }
-                return text
-            }
+            let text = try await extractFileText(path: filePath, taskLabel: "get file text")
+            return text.isEmpty ? "No text found in file" : text
         }
     ))
 
@@ -445,6 +378,112 @@ func registerFileTools(registry: ToolRegistry, settings: SettingsManager) {
             return "__FILE_QA__:\(input)"
         }
     ))
+}
+
+// MARK: - Shared text extraction
+
+let audioVideoExtensions: Set<String> = [
+    "mp3", "m4a", "wav", "aac", "flac", "ogg", "opus",
+    "mp4", "mov", "mkv", "webm", "avi",
+]
+
+private let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "tiff", "bmp", "gif", "heic", "webp"]
+
+/// Make sure the Whisper model is on disk and healthy; returns its path.
+func ensureWhisperModel() async throws -> String {
+    let modelDir = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".cache/whisper").path
+    try? FileManager.default.createDirectory(atPath: modelDir, withIntermediateDirectories: true)
+    let modelPath = "\(modelDir)/ggml-base.bin"
+
+    if !FileManager.default.fileExists(atPath: modelPath) {
+        let modelURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+        _ = try await shellExec("/usr/bin/curl", args: ["-fL", "-o", modelPath, modelURL])
+        // A failed download can leave a partial/empty file that would be
+        // treated as a valid model forever — verify and clean up
+        let attrs = try? FileManager.default.attributesOfItem(atPath: modelPath)
+        let size = (attrs?[.size] as? Int64) ?? 0
+        if size < 10_000_000 {
+            try? FileManager.default.removeItem(atPath: modelPath)
+            throw ToolError.failed("Whisper model download failed (incomplete file). Check your network connection and try again.")
+        }
+    }
+    return modelPath
+}
+
+/// Readable text from any supported file: plain text, PDF, docx, images
+/// (Vision OCR) and audio/video (Whisper transcription). Shared by
+/// `get file text`, `summarize file` and `file qa`.
+func extractFileText(path rawPath: String, taskLabel: String? = nil) async throws -> String {
+    let p = (rawPath.trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath
+    guard FileManager.default.fileExists(atPath: p) else {
+        throw ToolError.failed("file not found at \(p)")
+    }
+
+    let ext = (p as NSString).pathExtension.lowercased()
+    if ext == "pdf" {
+        // macOS built-in PDFKit via python
+        let script = "import sys; from Quartz import PDFDocument; from Foundation import NSURL; d=PDFDocument.alloc().initWithURL_(NSURL.fileURLWithPath_(sys.argv[1])); print(''.join([d.pageAtIndex_(i).string() or '' for i in range(d.pageCount())]))"
+        let text = try await shellExec(PythonEnv.shared.pythonPath, args: ["-c", script, p])
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    if ext == "docx" {
+        let script = """
+        import zipfile, xml.etree.ElementTree as ET, sys
+        z=zipfile.ZipFile(sys.argv[1])
+        xml=z.read('word/document.xml')
+        root=ET.fromstring(xml)
+        ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+        print('\\n'.join([''.join([t.text or '' for t in p.findall('.//w:t',ns)]) for p in root.findall('.//w:p',ns)]))
+        """
+        let text = try await shellExec(PythonEnv.shared.pythonPath, args: ["-c", script, p])
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    if imageExtensions.contains(ext) {
+        // OCR via macOS Vision framework
+        let script = """
+        import sys, objc
+        from Foundation import NSURL
+        import Vision, Quartz
+        url = NSURL.fileURLWithPath_(sys.argv[1])
+        src = Quartz.CGImageSourceCreateWithURL(url, None)
+        if not src: print("Error: cannot open image"); sys.exit(1)
+        img = Quartz.CGImageSourceCreateImageAtIndex(src, 0, None)
+        req = Vision.VNRecognizeTextRequest.alloc().init()
+        req.setRecognitionLevel_(1)
+        handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(img, None)
+        handler.performRequests_error_([req], None)
+        for obs in req.results() or []:
+            print(obs.topCandidates_(1)[0].string())
+        """
+        let text = try await shellExec(PythonEnv.shared.pythonPath, args: ["-c", script, p])
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    if audioVideoExtensions.contains(ext) {
+        // Whisper transcription into a temp file (real progress when the
+        // caller registered a running task)
+        let whisper = try await ensureDep("whisper-cpp", brew: "whisper-cpp")
+        let model = try await ensureWhisperModel()
+        let tmpBase = NSTemporaryDirectory() + "raccoon-extract-\(UUID().uuidString)"
+        var taskID: UUID?
+        if let taskLabel {
+            taskID = await MainActor.run { runningTaskID(for: taskLabel) }
+        }
+        _ = try await shellExec(whisper, args: [
+            "-m", model, "-f", p, "-otxt", "--print-progress", "-of", tmpBase,
+        ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseWhisperProgress))
+        defer { try? FileManager.default.removeItem(atPath: tmpBase + ".txt") }
+        guard let text = try? String(contentsOfFile: tmpBase + ".txt", encoding: .utf8) else {
+            throw ToolError.failed("transcription produced no text")
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // Anything else: try plain text
+    guard let text = try? String(contentsOfFile: p, encoding: .utf8) else {
+        throw ToolError.failed("unsupported file type .\(ext) — supported: text, pdf, docx, images (OCR), audio/video (transcription)")
+    }
+    return text
 }
 
 func formatSize(_ bytes: Int64) -> String {

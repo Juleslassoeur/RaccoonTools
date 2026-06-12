@@ -35,6 +35,11 @@ class SettingsManager: ObservableObject {
     @Published var translateMode: String {
         didSet { UserDefaults.standard.set(translateMode, forKey: "translateMode") }
     }
+    // Grammar/spelling engine for fix grammar / fix orth: "llm" or
+    // "languagetool" (free public API, falls back to the LLM on error)
+    @Published var grammarEngine: String {
+        didSet { UserDefaults.standard.set(grammarEngine, forKey: "grammarEngine") }
+    }
     // Default target language for translate tool
     @Published var defaultTranslateTarget: String {
         didSet { UserDefaults.standard.set(defaultTranslateTarget, forKey: "defaultTranslateTarget") }
@@ -99,6 +104,7 @@ class SettingsManager: ObservableObject {
         self.hotKeyModifiers = UserDefaults.standard.object(forKey: "hotKeyModifiers") as? Int ?? 0x0900
         self.hotKeyCode = UserDefaults.standard.object(forKey: "hotKeyCode") as? Int ?? 49
         self.translateMode = UserDefaults.standard.string(forKey: "translateMode") ?? "cli"
+        self.grammarEngine = UserDefaults.standard.string(forKey: "grammarEngine") ?? "llm"
         self.defaultTranslateTarget = UserDefaults.standard.string(forKey: "defaultTranslateTarget") ?? "en"
         self.globalToneRules = UserDefaults.standard.string(forKey: "globalToneRules") ?? ""
         self.defaultResponseLanguage = UserDefaults.standard.string(forKey: "defaultResponseLanguage") ?? "auto"

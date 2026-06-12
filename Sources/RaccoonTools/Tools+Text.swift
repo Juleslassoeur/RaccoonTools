@@ -159,12 +159,7 @@ func registerTextTools(registry: ToolRegistry, settings: SettingsManager) {
         handler: { url in
             guard !url.isEmpty else { return "Error: please provide a URL" }
             let html = try await shellExec("/usr/bin/curl", args: ["-sL", "--max-time", "15", url])
-            let text = html
-                .replacingOccurrences(of: "<script[^>]*>[\\s\\S]*?</script>", with: "", options: .regularExpression)
-                .replacingOccurrences(of: "<style[^>]*>[\\s\\S]*?</style>", with: "", options: .regularExpression)
-                .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-                .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = stripHTML(html)
             guard !text.isEmpty else { return "Error: could not fetch content from \(url)" }
             let truncated = truncateForLLM(text)
             let toolPath = "summarize link"
@@ -220,20 +215,10 @@ func registerTextTools(registry: ToolRegistry, settings: SettingsManager) {
         handler: { filePath in
             guard !filePath.isEmpty else { return "Error: drag & drop a file or provide a path" }
             let expanded = (filePath.trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath
-            guard FileManager.default.fileExists(atPath: expanded) else {
-                return "Error: file not found at \(expanded)"
-            }
-            guard let data = FileManager.default.contents(atPath: expanded) else {
-                return "Error: could not read file"
-            }
-            // Try reading as text
-            let content: String
-            if let text = String(data: data, encoding: .utf8) {
-                content = text
-            } else {
-                return "Error: file doesn't appear to be a text file"
-            }
-            guard !content.isEmpty else { return "Error: file is empty" }
+            // Works for text, PDF, docx, images (OCR) and audio/video
+            // (Whisper transcription) via the shared extractor
+            let content = try await extractFileText(path: expanded, taskLabel: "summarize file")
+            guard !content.isEmpty else { return "Error: no readable text in this file" }
             let truncated = truncateForLLM(content)
             let filename = (expanded as NSString).lastPathComponent
             let toolPath = "summarize file"
@@ -293,6 +278,12 @@ func registerTextTools(registry: ToolRegistry, settings: SettingsManager) {
                 text = NSPasteboard.general.string(forType: .string) ?? ""
             }
             guard !text.isEmpty else { return "Error: no text provided and clipboard is empty" }
+            // Free LanguageTool engine when selected (LLM fallback on error)
+            if settings.grammarEngine == "languagetool" {
+                if let corrected = try? await LanguageTool.correct(text, onlySpelling: false) {
+                    return corrected
+                }
+            }
             let toolPath = "fix grammar"
             let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
             let provider = settings.getProvider(for: toolPath)
@@ -309,6 +300,12 @@ func registerTextTools(registry: ToolRegistry, settings: SettingsManager) {
             var text = input.trimmingCharacters(in: .whitespaces)
             if text.isEmpty { text = NSPasteboard.general.string(forType: .string) ?? "" }
             guard !text.isEmpty else { return "Error: no text provided and clipboard is empty" }
+            // Free LanguageTool engine when selected — spelling issues only
+            if settings.grammarEngine == "languagetool" {
+                if let corrected = try? await LanguageTool.correct(text, onlySpelling: true) {
+                    return corrected
+                }
+            }
             let prompt = settings.getSystemPrompt(for: "fix orth", default: "Fix only spelling and typos in the following text. Do NOT change grammar, punctuation, or style. Return only the corrected text, no explanations.")
             let provider = settings.getProvider(for: "fix orth")
             return try await LLMService.call(provider: provider, systemPrompt: prompt, userMessage: text)

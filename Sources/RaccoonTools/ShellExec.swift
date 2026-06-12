@@ -33,6 +33,7 @@ func ensureDep(_ name: String, brew: String? = nil) async throws -> String {
 enum ToolError: LocalizedError {
     case dependencyMissing(String)
     case cancelled
+    case failed(String)
 
     var errorDescription: String? {
         switch self {
@@ -40,6 +41,8 @@ enum ToolError: LocalizedError {
             return "\(name) not found. Run: brew install \(name)"
         case .cancelled:
             return "Cancelled"
+        case .failed(let message):
+            return message
         }
     }
 }
