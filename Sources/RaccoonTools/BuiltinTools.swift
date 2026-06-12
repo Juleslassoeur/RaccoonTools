@@ -13,6 +13,7 @@ func registerBuiltinTools() {
     registerTextTools(registry: registry, settings: settings)
 
     registry.markBuiltinsRegistered()
+    registry.applyPathOverrides(settings.toolPathOverrides)
     registerCustomTools(registry: registry, settings: settings)
     registry.disabledPaths = settings.disabledToolPaths
 }
@@ -33,17 +34,20 @@ func registerCustomTools(registry: ToolRegistry, settings: SettingsManager) {
         guard !builtins.contains(fullPath), seen.insert(fullPath).inserted else { continue }
 
         let defaultPrompt = custom.prompt
+        // Stable identity: provider/prompt bindings survive renames
+        let bindingKey = "custom:\(custom.id.uuidString)"
         registry.register(ToolCommand(
             path: tokens,
             description: custom.description.isEmpty ? "Custom tool" : custom.description,
             parameterName: "text",
             usesLLM: true,
+            bindingKey: bindingKey,
             handler: { input in
                 var text = input.trimmingCharacters(in: .whitespaces)
                 if text.isEmpty { text = NSPasteboard.general.string(forType: .string) ?? "" }
                 guard !text.isEmpty else { return "Error: no text provided and clipboard is empty" }
-                let provider = settings.getProvider(for: fullPath)
-                let prompt = settings.getSystemPrompt(for: fullPath, default: defaultPrompt)
+                let provider = settings.getProvider(for: bindingKey)
+                let prompt = settings.getSystemPrompt(for: bindingKey, default: defaultPrompt)
                 return try await LLMService.call(provider: provider, systemPrompt: prompt, userMessage: text)
             }
         ))

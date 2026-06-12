@@ -614,7 +614,9 @@ struct ToolBindingsTab: View {
                         Text(tool.description)
                             .font(.caption2).foregroundColor(.secondary).lineLimit(1)
                     }
-                    .tag(tool.fullPath)
+                    // Bindings are keyed by the tool's stable identity so they
+                    // survive renames/moves done in the Tool Library
+                    .tag(tool.bindingKey)
                 }
             }
             .frame(width: 200)

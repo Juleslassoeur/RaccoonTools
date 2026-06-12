@@ -6,14 +6,20 @@ struct ToolCommand: Identifiable {
     let description: String
     let parameterName: String?   // e.g. "url", nil if no param needed
     let usesLLM: Bool
+    /// Stable identity for settings (provider/prompt bindings, hidden set):
+    /// stays the ORIGINAL path when the user renames/moves the tool, so its
+    /// configuration follows it around.
+    let bindingKey: String
     let handler: (String) async throws -> String
 
     init(path: [String], description: String, parameterName: String? = nil,
-         usesLLM: Bool = false, handler: @escaping (String) async throws -> String) {
+         usesLLM: Bool = false, bindingKey: String? = nil,
+         handler: @escaping (String) async throws -> String) {
         self.path = path
         self.description = description
         self.parameterName = parameterName
         self.usesLLM = usesLLM
+        self.bindingKey = bindingKey ?? path.joined(separator: " ")
         self.handler = handler
     }
 
@@ -47,9 +53,30 @@ class ToolRegistry: ObservableObject {
         builtinPaths = []
     }
 
-    /// Tools not hidden by the user.
+    /// Tools not hidden by the user (keyed by stable identity, so a renamed
+    /// tool stays hidden/visible regardless of its current path).
     private var visibleTools: [ToolCommand] {
-        disabledPaths.isEmpty ? tools : tools.filter { !disabledPaths.contains($0.fullPath) }
+        disabledPaths.isEmpty ? tools : tools.filter { !disabledPaths.contains($0.bindingKey) }
+    }
+
+    /// Re-registers tools under user-chosen paths (Settings > Tool Library).
+    /// `overrides` maps a tool's bindingKey (its original path) to the new
+    /// space-separated path. Renaming a shared prefix moves whole folders.
+    func applyPathOverrides(_ overrides: [String: String]) {
+        guard !overrides.isEmpty else { return }
+        tools = tools.map { tool in
+            guard let newPath = overrides[tool.bindingKey] else { return tool }
+            let tokens = tokenize(newPath.lowercased())
+            guard !tokens.isEmpty else { return tool }
+            return ToolCommand(
+                path: tokens,
+                description: tool.description,
+                parameterName: tool.parameterName,
+                usesLLM: tool.usesLLM,
+                bindingKey: tool.bindingKey,
+                handler: tool.handler
+            )
+        }
     }
 
     /// Returns tools whose path starts with the given tokens (prefix match)

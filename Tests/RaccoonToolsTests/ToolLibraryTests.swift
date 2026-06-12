@@ -64,4 +64,34 @@ struct DisabledToolsTests {
         #expect(registry.search(tokens: []).count == 3)
         #expect(registry.resolve(input: "fix grammar x") != nil)
     }
+
+    @Test func pathOverridesRenameAndMoveTools() {
+        let registry = makeRegistry()
+        registry.markBuiltinsRegistered()
+        registry.applyPathOverrides(["fix grammar": "polish text"])
+
+        // Reachable under the new name only, with its stable identity intact
+        let resolved = registry.resolve(input: "polish text hello")
+        #expect(resolved?.0.bindingKey == "fix grammar")
+        #expect(resolved?.1 == "hello")
+        #expect(registry.resolve(input: "fix grammar hello") == nil)
+
+        // The tree follows the new paths
+        #expect(registry.nextSegments(for: ["polish"]).map(\.segment) == ["text"])
+    }
+
+    @Test func hiddenStateSurvivesRenames() {
+        let registry = makeRegistry()
+        registry.markBuiltinsRegistered()
+        registry.applyPathOverrides(["fix grammar": "polish text"])
+        registry.disabledPaths = ["fix grammar"]  // keyed by stable identity
+        #expect(registry.resolve(input: "polish text hello") == nil)
+    }
+
+    @Test func emptyOverridePathIsIgnored() {
+        let registry = makeRegistry()
+        registry.markBuiltinsRegistered()
+        registry.applyPathOverrides(["fix grammar": "   "])
+        #expect(registry.resolve(input: "fix grammar hello") != nil)
+    }
 }

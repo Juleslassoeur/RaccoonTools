@@ -107,6 +107,11 @@ class SettingsManager: ObservableObject {
     @Published var disabledToolPaths: Set<String> {
         didSet { saveCodable(Array(disabledToolPaths), key: "disabledToolPaths") }
     }
+    // Rename/move layer over built-in tools: bindingKey (original path) →
+    // user-chosen path. Renaming a shared prefix moves whole folders.
+    @Published var toolPathOverrides: [String: String] {
+        didSet { saveCodable(toolPathOverrides, key: "toolPathOverrides") }
+    }
 
     // LLM Providers
     @Published var providers: [LLMProviderConfig] {
@@ -142,6 +147,7 @@ class SettingsManager: ObservableObject {
         self.hasCompletedOnboarding = UserDefaults.standard.object(forKey: "hasCompletedOnboarding") as? Bool ?? false
         self.customTools = Self.loadCodable([CustomTool].self, key: "customTools") ?? []
         self.disabledToolPaths = Set(Self.loadCodable([String].self, key: "disabledToolPaths") ?? [])
+        self.toolPathOverrides = Self.loadCodable([String: String].self, key: "toolPathOverrides") ?? [:]
 
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         configDir = appSupport.appendingPathComponent("RaccoonTools")
