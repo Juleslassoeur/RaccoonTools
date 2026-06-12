@@ -898,19 +898,26 @@ struct SpotlightView: View {
         }
 
         // Special: file Q&A — extract readable text first (PDF, docx, images
-        // and audio/video are supported via the shared extractor)
+        // and audio/video via the shared extractor; URLs via stripHTML)
         if tool.fullPath == "file qa" {
-            let filePath = state.droppedFilePath ?? param.trimmingCharacters(in: .whitespaces)
-            let expanded = (filePath as NSString).expandingTildeInPath
-            guard FileManager.default.fileExists(atPath: expanded) else {
-                state.resultText = "Error: drag & drop a file first"
+            let input = (state.droppedFilePath ?? param).trimmingCharacters(in: .whitespaces)
+            let isURL = input.hasPrefix("http://") || input.hasPrefix("https://")
+            let expanded = (input as NSString).expandingTildeInPath
+            guard isURL || FileManager.default.fileExists(atPath: expanded) else {
+                state.resultText = "Error: drag & drop a file (or paste a URL) first"
                 return
             }
             state.isRunning = true
             state.runningToolName = "file qa"
             Task {
                 do {
-                    let content = try await extractFileText(path: expanded, taskLabel: "file qa")
+                    let content: String
+                    if isURL {
+                        let html = try await shellExec("/usr/bin/curl", args: ["-sL", "--max-time", "15", input])
+                        content = stripHTML(html)
+                    } else {
+                        content = try await extractFileText(path: expanded, taskLabel: "file qa")
+                    }
                     await MainActor.run {
                         state.isRunning = false
                         guard !content.isEmpty else {

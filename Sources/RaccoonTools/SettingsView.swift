@@ -2,20 +2,54 @@ import SwiftUI
 import Carbon
 
 struct SettingsView: View {
-    var body: some View {
-        TabView {
-            GeneralSettingsTab()
-                .tabItem { Label("General", systemImage: "gear") }
-            LLMProvidersTab()
-                .tabItem { Label("LLM Providers", systemImage: "brain") }
-            FreeModeSettingsTab()
-                .tabItem { Label("Contextual", systemImage: "text.cursor") }
-            ToolBindingsTab()
-                .tabItem { Label("Tools", systemImage: "wrench") }
-            InstantEditSettingsTab()
-                .tabItem { Label("Instant Edit", systemImage: "bolt") }
+    @State private var section: SettingsSection = .general
+
+    enum SettingsSection: String, CaseIterable, Identifiable {
+        case general = "General"
+        case providers = "LLM Providers"
+        case contextual = "Contextual"
+        case tools = "Tools"
+        case library = "Tool Library"
+        case instantEdit = "Instant Edit"
+
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .general: return "gear"
+            case .providers: return "brain"
+            case .contextual: return "text.cursor"
+            case .tools: return "wrench"
+            case .library: return "square.grid.2x2"
+            case .instantEdit: return "bolt"
+            }
         }
-        .frame(width: 700, height: 500)
+    }
+
+    // Sidebar layout: the tab bar overflowed once the sections multiplied
+    var body: some View {
+        HStack(spacing: 0) {
+            List(SettingsSection.allCases, selection: $section) { item in
+                Label(item.rawValue, systemImage: item.icon)
+                    .tag(item)
+            }
+            .listStyle(.sidebar)
+            .frame(width: 185)
+
+            Divider()
+
+            Group {
+                switch section {
+                case .general: GeneralSettingsTab()
+                case .providers: LLMProvidersTab()
+                case .contextual: FreeModeSettingsTab()
+                case .tools: ToolBindingsTab()
+                case .library: ToolLibraryTab()
+                case .instantEdit: InstantEditSettingsTab()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(width: 860, height: 560)
     }
 }
 
@@ -56,6 +90,16 @@ struct GeneralSettingsTab: View {
                     Text("LanguageTool — free API, no key, faster (falls back to LLM on error)").tag("languagetool")
                 }
                 .pickerStyle(.radioGroup)
+            }
+
+            Section("Dictionary (def)") {
+                Picker("Engine", selection: $settings.dictionaryEngine) {
+                    Text("LLM (configure in Tools tab)").tag("llm")
+                    Text("macOS dictionaries — offline, instant (falls back to LLM if not found)").tag("system")
+                }
+                .pickerStyle(.radioGroup)
+                Text("The offline engine uses the dictionaries enabled in Dictionary.app (add French ones there if needed). Synonyms stay on the LLM — there is no decent offline thesaurus for French.")
+                    .font(.caption).foregroundColor(.secondary)
             }
 
             Section("Translate") {

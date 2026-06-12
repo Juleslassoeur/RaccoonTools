@@ -17,6 +17,16 @@ struct QuickAction: Codable, Hashable, Identifiable {
     ]
 }
 
+/// A user-defined LLM tool: shows up in the launcher and contextual mode
+/// exactly like a built-in one. The selected/typed/clipboard text is sent as
+/// the user message with `prompt` as the system prompt.
+struct CustomTool: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    var path: String        // space-separated, e.g. "rephrase pirate"
+    var description: String
+    var prompt: String
+}
+
 class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
 
@@ -39,6 +49,11 @@ class SettingsManager: ObservableObject {
     // "languagetool" (free public API, falls back to the LLM on error)
     @Published var grammarEngine: String {
         didSet { UserDefaults.standard.set(grammarEngine, forKey: "grammarEngine") }
+    }
+    // Dictionary engine for def: "llm" or "system" (offline macOS
+    // dictionaries, falls back to the LLM when the word isn't found)
+    @Published var dictionaryEngine: String {
+        didSet { UserDefaults.standard.set(dictionaryEngine, forKey: "dictionaryEngine") }
     }
     // Default target language for translate tool
     @Published var defaultTranslateTarget: String {
@@ -85,6 +100,13 @@ class SettingsManager: ObservableObject {
     @Published var hasCompletedOnboarding: Bool {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
     }
+    // Tool library: user-created tools and hidden built-ins
+    @Published var customTools: [CustomTool] {
+        didSet { saveCodable(customTools, key: "customTools") }
+    }
+    @Published var disabledToolPaths: Set<String> {
+        didSet { saveCodable(Array(disabledToolPaths), key: "disabledToolPaths") }
+    }
 
     // LLM Providers
     @Published var providers: [LLMProviderConfig] {
@@ -105,6 +127,7 @@ class SettingsManager: ObservableObject {
         self.hotKeyCode = UserDefaults.standard.object(forKey: "hotKeyCode") as? Int ?? 49
         self.translateMode = UserDefaults.standard.string(forKey: "translateMode") ?? "cli"
         self.grammarEngine = UserDefaults.standard.string(forKey: "grammarEngine") ?? "llm"
+        self.dictionaryEngine = UserDefaults.standard.string(forKey: "dictionaryEngine") ?? "llm"
         self.defaultTranslateTarget = UserDefaults.standard.string(forKey: "defaultTranslateTarget") ?? "en"
         self.globalToneRules = UserDefaults.standard.string(forKey: "globalToneRules") ?? ""
         self.defaultResponseLanguage = UserDefaults.standard.string(forKey: "defaultResponseLanguage") ?? "auto"
@@ -117,6 +140,8 @@ class SettingsManager: ObservableObject {
         self.instantEditKeyCode = UserDefaults.standard.object(forKey: "instantEditKeyCode") as? Int ?? 14
         self.instantEditModifiers = UserDefaults.standard.object(forKey: "instantEditModifiers") as? Int ?? 0x0900
         self.hasCompletedOnboarding = UserDefaults.standard.object(forKey: "hasCompletedOnboarding") as? Bool ?? false
+        self.customTools = Self.loadCodable([CustomTool].self, key: "customTools") ?? []
+        self.disabledToolPaths = Set(Self.loadCodable([String].self, key: "disabledToolPaths") ?? [])
 
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         configDir = appSupport.appendingPathComponent("RaccoonTools")

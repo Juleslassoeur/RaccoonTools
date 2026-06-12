@@ -25,14 +25,37 @@ class ToolRegistry: ObservableObject {
 
     @Published var tools: [ToolCommand] = []
 
+    /// Tool paths hidden by the user (Settings > Tool Library). Hidden tools
+    /// are excluded from search, suggestions, resolution and the menu bar.
+    var disabledPaths: Set<String> = []
+
+    /// Paths of the built-in tools, captured right after their registration
+    /// (everything registered later is a user-defined custom tool).
+    private(set) var builtinPaths: [String] = []
+
     func register(_ tool: ToolCommand) {
         tools.append(tool)
     }
 
+    func markBuiltinsRegistered() {
+        builtinPaths = tools.map(\.fullPath)
+    }
+
+    /// Full re-registration (used when the tool library changes).
+    func removeAllTools() {
+        tools.removeAll()
+        builtinPaths = []
+    }
+
+    /// Tools not hidden by the user.
+    private var visibleTools: [ToolCommand] {
+        disabledPaths.isEmpty ? tools : tools.filter { !disabledPaths.contains($0.fullPath) }
+    }
+
     /// Returns tools whose path starts with the given tokens (prefix match)
     func search(tokens: [String]) -> [ToolCommand] {
-        if tokens.isEmpty { return tools }
-        return tools.filter { tool in
+        if tokens.isEmpty { return visibleTools }
+        return visibleTools.filter { tool in
             for (i, token) in tokens.enumerated() {
                 if i >= tool.path.count { return false }
                 let t = token.lowercased()
@@ -80,7 +103,7 @@ class ToolRegistry: ObservableObject {
         // Try longest match first
         for length in stride(from: tokens.count, through: 1, by: -1) {
             let pathTokens = Array(tokens.prefix(length))
-            let match = tools.first { tool in
+            let match = visibleTools.first { tool in
                 tool.path.count == length && zip(tool.path, pathTokens).allSatisfy {
                     $0.0.lowercased() == $0.1.lowercased()
                 }
@@ -129,7 +152,7 @@ class ToolRegistry: ObservableObject {
     /// Build tree structure for menu bar grouping
     func buildTree() -> [ToolTreeNode] {
         var root: [ToolTreeNode] = []
-        for tool in tools {
+        for tool in visibleTools {
             insertIntoTree(node: &root, tool: tool, depth: 0)
         }
         return sortTree(root)

@@ -289,7 +289,7 @@ func registerFileTools(registry: ToolRegistry, settings: SettingsManager) {
     // file to markdown
     registry.register(ToolCommand(
         path: ["file", "to", "markdown"],
-        description: "Convert PDF/docx to markdown (drag & drop)",
+        description: "Convert PDF/docx/audio to markdown (drag & drop)",
         parameterName: "file",
         handler: { filePath in
             guard !filePath.isEmpty else { return "Error: drag & drop a file" }
@@ -299,7 +299,22 @@ func registerFileTools(registry: ToolRegistry, settings: SettingsManager) {
             let outputPath = "\(settings.outputFolder)/\(baseName).md"
             let ext = (p as NSString).pathExtension.lowercased()
 
-            if ext == "pdf" {
+            if audioVideoExtensions.contains(ext) {
+                // Timestamped transcript via Whisper (SRT → markdown)
+                let whisper = try await ensureDep("whisper-cpp", brew: "whisper-cpp")
+                let model = try await ensureWhisperModel()
+                let tmpBase = NSTemporaryDirectory() + "raccoon-md-\(UUID().uuidString)"
+                let taskID = await runningTaskID(for: "file to markdown")
+                _ = try await shellExec(whisper, args: [
+                    "-m", model, "-f", p, "-osrt", "--print-progress", "-of", tmpBase,
+                ], taskID: taskID, onLine: progressLineHandler(taskID: taskID, parser: parseWhisperProgress))
+                defer { try? FileManager.default.removeItem(atPath: tmpBase + ".srt") }
+                guard let srt = try? String(contentsOfFile: tmpBase + ".srt", encoding: .utf8) else {
+                    return "Error: transcription produced no text"
+                }
+                let md = "# \(baseName)\n\n" + srtToMarkdown(srt)
+                try md.write(toFile: outputPath, atomically: true, encoding: .utf8)
+            } else if ext == "pdf" {
                 let script = "import sys; from Quartz import PDFDocument; from Foundation import NSURL; d=PDFDocument.alloc().initWithURL_(NSURL.fileURLWithPath_(sys.argv[1])); print(''.join([d.pageAtIndex_(i).string() or '' for i in range(d.pageCount())]))"
                 let text = try await shellExec(PythonEnv.shared.pythonPath, args: ["-c", script, p])
                 try text.write(toFile: outputPath, atomically: true, encoding: .utf8)
@@ -378,6 +393,47 @@ func registerFileTools(registry: ToolRegistry, settings: SettingsManager) {
             return "__FILE_QA__:\(input)"
         }
     ))
+}
+
+// MARK: - SRT → markdown (pure, unit-testable)
+
+/// Converts SRT subtitles into a timestamped markdown transcript:
+/// one "**[mm:ss]** text" line per cue (hours included when non-zero).
+func srtToMarkdown(_ srt: String) -> String {
+    var lines: [String] = []
+    var currentTime: String?
+    var currentText: [String] = []
+
+    func flush() {
+        if let time = currentTime, !currentText.isEmpty {
+            lines.append("**[\(time)]** \(currentText.joined(separator: " "))")
+        }
+        currentTime = nil
+        currentText = []
+    }
+
+    for raw in srt.components(separatedBy: .newlines) {
+        let line = raw.trimmingCharacters(in: .whitespaces)
+        if line.isEmpty { flush(); continue }
+        if line.contains("-->") {
+            // "00:01:23,450 --> 00:01:25,000" → keep the start, drop ms
+            let start = line.components(separatedBy: "-->")[0]
+                .trimmingCharacters(in: .whitespaces)
+                .components(separatedBy: ",")[0]
+            let parts = start.components(separatedBy: ":")
+            if parts.count == 3 {
+                currentTime = parts[0] == "00" ? "\(parts[1]):\(parts[2])" : start
+            } else {
+                currentTime = start
+            }
+            continue
+        }
+        // Cue indexes are bare integers — skip them
+        if Int(line) != nil && currentTime == nil { continue }
+        if currentTime != nil { currentText.append(line) }
+    }
+    flush()
+    return lines.joined(separator: "\n\n")
 }
 
 // MARK: - Shared text extraction

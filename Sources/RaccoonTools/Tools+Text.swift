@@ -1,6 +1,18 @@
 import Foundation
 import AppKit
 
+/// Definition from the user's enabled macOS dictionaries (offline). Returns
+/// nil when no dictionary knows the word. French works when a French
+/// dictionary is enabled in Dictionary.app's preferences.
+func systemDictionaryDefinition(for word: String) -> String? {
+    let range = CFRange(location: 0, length: word.utf16.count)
+    guard range.length > 0,
+          let definition = DCSCopyTextDefinition(nil, word as CFString, range)?.takeRetainedValue() else {
+        return nil
+    }
+    return (definition as String).trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 func registerTextTools(registry: ToolRegistry, settings: SettingsManager) {
     // ============================================================
     // MARK: - TRANSLATE
@@ -106,6 +118,12 @@ func registerTextTools(registry: ToolRegistry, settings: SettingsManager) {
         usesLLM: true,
         handler: { word in
             guard !word.isEmpty else { return "Error: please provide a word" }
+            // Offline engine: the user's macOS dictionaries (Dictionary.app).
+            // Falls back to the LLM when the word isn't found.
+            if settings.dictionaryEngine == "system",
+               let definition = systemDictionaryDefinition(for: word.trimmingCharacters(in: .whitespaces)) {
+                return definition
+            }
             let toolPath = "def"
             let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
             let provider = settings.getProvider(for: toolPath)
