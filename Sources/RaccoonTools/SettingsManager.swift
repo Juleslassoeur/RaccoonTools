@@ -107,6 +107,11 @@ class SettingsManager: ObservableObject {
     @Published var disabledToolPaths: Set<String> {
         didSet { saveCodable(Array(disabledToolPaths), key: "disabledToolPaths") }
     }
+    // Deleted prompt-based built-ins (bindingKeys): functionally hidden AND
+    // gone from the library tree; restorable from the library's trash section
+    @Published var deletedToolPaths: Set<String> {
+        didSet { saveCodable(Array(deletedToolPaths), key: "deletedToolPaths") }
+    }
     // Rename/move layer over built-in tools: bindingKey (original path) →
     // user-chosen path. Renaming a shared prefix moves whole folders.
     @Published var toolPathOverrides: [String: String] {
@@ -147,6 +152,7 @@ class SettingsManager: ObservableObject {
         self.hasCompletedOnboarding = UserDefaults.standard.object(forKey: "hasCompletedOnboarding") as? Bool ?? false
         self.customTools = Self.loadCodable([CustomTool].self, key: "customTools") ?? []
         self.disabledToolPaths = Set(Self.loadCodable([String].self, key: "disabledToolPaths") ?? [])
+        self.deletedToolPaths = Set(Self.loadCodable([String].self, key: "deletedToolPaths") ?? [])
         self.toolPathOverrides = Self.loadCodable([String: String].self, key: "toolPathOverrides") ?? [:]
 
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!

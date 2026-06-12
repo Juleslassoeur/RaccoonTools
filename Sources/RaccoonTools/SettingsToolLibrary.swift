@@ -119,6 +119,28 @@ struct ToolLibraryTab: View {
             }
             .padding(.horizontal, 12)
 
+            if !settings.deletedToolPaths.isEmpty {
+                DisclosureGroup {
+                    ForEach(settings.deletedToolPaths.sorted(), id: \.self) { key in
+                        HStack {
+                            Text(settings.toolPathOverrides[key] ?? key)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button("Restore") {
+                                settings.deletedToolPaths.remove(key)
+                                ToolRegistry.shared.disabledPaths = settings.disabledToolPaths.union(settings.deletedToolPaths)
+                            }
+                            .font(.caption)
+                        }
+                    }
+                } label: {
+                    Label("Deleted tools (\(settings.deletedToolPaths.count))", systemImage: "trash")
+                        .font(.caption)
+                }
+                .padding(.horizontal, 12)
+            }
+
             if let customID = selectedCustomID,
                let index = settings.customTools.firstIndex(where: { $0.id == customID }) {
                 customToolEditor(index: index)
@@ -165,7 +187,7 @@ struct ToolLibraryTab: View {
                         } else {
                             settings.disabledToolPaths.insert(key)
                         }
-                        ToolRegistry.shared.disabledPaths = settings.disabledToolPaths
+                        ToolRegistry.shared.disabledPaths = settings.disabledToolPaths.union(settings.deletedToolPaths)
                     } label: {
                         Image(systemName: hidden ? "eye.slash" : "eye")
                             .font(.caption2)
@@ -173,6 +195,20 @@ struct ToolLibraryTab: View {
                     }
                     .buttonStyle(.plain)
                     .help(hidden ? "Hidden — click to show" : "Click to hide everywhere")
+                }
+                // Prompt-based built-ins can be deleted (restorable from the
+                // trash section below); functional built-ins only hide
+                if !node.isFolder, !node.isCustomTool, let key = node.bindingKey,
+                   ToolRegistry.shared.builtinLLMKeys.contains(key) {
+                    Button {
+                        settings.deletedToolPaths.insert(key)
+                        ToolRegistry.shared.disabledPaths = settings.disabledToolPaths.union(settings.deletedToolPaths)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.caption2).foregroundColor(.red.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete (restorable from the trash section below)")
                 }
                 if node.isCustomTool, let customID = node.customID {
                     Button {
@@ -243,10 +279,13 @@ struct ToolLibraryTab: View {
     // MARK: Tree building
 
     /// Current effective (bindingKey, path, custom) list driving the tree.
+    /// Deleted built-ins are not listed (they live in the trash section).
     private var libraryItems: [(key: String, path: String, customID: UUID?)] {
-        let builtins = ToolRegistry.shared.builtinPaths.map { original in
-            (key: original, path: settings.toolPathOverrides[original] ?? original, customID: UUID?.none)
-        }
+        let builtins = ToolRegistry.shared.builtinPaths
+            .filter { !settings.deletedToolPaths.contains($0) }
+            .map { original in
+                (key: original, path: settings.toolPathOverrides[original] ?? original, customID: UUID?.none)
+            }
         let customs = settings.customTools.compactMap { tool -> (key: String, path: String, customID: UUID?)? in
             let path = ToolTreePaths.normalized(tool.path)
             guard !path.isEmpty else { return nil }

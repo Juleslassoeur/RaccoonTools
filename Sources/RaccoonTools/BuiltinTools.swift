@@ -15,7 +15,9 @@ func registerBuiltinTools() {
     registry.markBuiltinsRegistered()
     registry.applyPathOverrides(settings.toolPathOverrides)
     registerCustomTools(registry: registry, settings: settings)
-    registry.disabledPaths = settings.disabledToolPaths
+    // Deleted prompt tools are functionally hidden tools that the library
+    // also stops listing
+    registry.disabledPaths = settings.disabledToolPaths.union(settings.deletedToolPaths)
 }
 
 /// User-defined LLM tools from Settings > Tool Library. They behave exactly

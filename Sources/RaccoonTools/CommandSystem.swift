@@ -39,18 +39,24 @@ class ToolRegistry: ObservableObject {
     /// (everything registered later is a user-defined custom tool).
     private(set) var builtinPaths: [String] = []
 
+    /// Built-ins that are pure LLM prompting — the only built-ins the user
+    /// can delete (functional tools can only be hidden).
+    private(set) var builtinLLMKeys: Set<String> = []
+
     func register(_ tool: ToolCommand) {
         tools.append(tool)
     }
 
     func markBuiltinsRegistered() {
         builtinPaths = tools.map(\.fullPath)
+        builtinLLMKeys = Set(tools.filter(\.usesLLM).map(\.bindingKey))
     }
 
     /// Full re-registration (used when the tool library changes).
     func removeAllTools() {
         tools.removeAll()
         builtinPaths = []
+        builtinLLMKeys = []
     }
 
     /// Tools not hidden by the user (keyed by stable identity, so a renamed
