@@ -32,6 +32,32 @@ struct SrtToMarkdownTests {
     }
 }
 
+struct ToolTreePathsTests {
+    @Test func rewritesTheNodeItselfAndItsDescendants() {
+        // Renaming/moving the "get youtube" folder
+        #expect(ToolTreePaths.rewritten(itemPath: "get youtube", nodePath: "get youtube", newNodePath: "yt") == "yt")
+        #expect(ToolTreePaths.rewritten(itemPath: "get youtube sound", nodePath: "get youtube", newNodePath: "yt") == "yt sound")
+        #expect(ToolTreePaths.rewritten(itemPath: "get file text", nodePath: "get youtube", newNodePath: "yt") == nil)
+        // Prefix similarity is not containment
+        #expect(ToolTreePaths.rewritten(itemPath: "get youtubers", nodePath: "get youtube", newNodePath: "yt") == nil)
+    }
+
+    @Test func selfAndDescendantGuard() {
+        #expect(ToolTreePaths.isSelfOrDescendant("get youtube", of: "get youtube"))
+        #expect(ToolTreePaths.isSelfOrDescendant("get youtube sub", of: "get youtube"))
+        #expect(!ToolTreePaths.isSelfOrDescendant("get", of: "get youtube"))
+        #expect(!ToolTreePaths.isSelfOrDescendant("get youtubers", of: "get youtube"))
+    }
+
+    @Test func segmentHelpers() {
+        #expect(ToolTreePaths.lastSegment("get youtube sound") == "sound")
+        #expect(ToolTreePaths.lastSegment("translate") == "translate")
+        #expect(ToolTreePaths.parent("get youtube sound") == "get youtube")
+        #expect(ToolTreePaths.parent("translate") == "")
+        #expect(ToolTreePaths.normalized("  Get   YouTube ") == "get youtube")
+    }
+}
+
 struct DisabledToolsTests {
     private func makeRegistry() -> ToolRegistry {
         let registry = ToolRegistry()
