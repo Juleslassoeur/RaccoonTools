@@ -940,15 +940,25 @@ struct SpotlightView: View {
             return
         }
 
+        // Captured text the tool should act on (free-mode current text wins,
+        // then the text grabbed at hotkey time)
+        let capturedText: String? = {
+            if state.showFree, !state.freeCurrentText.isEmpty { return state.freeCurrentText }
+            if let c = state.preGrabbedSelectedText, !c.isEmpty { return c }
+            return nil
+        }()
+
         // Resolve the actual parameter: dropped file > free mode current text > captured text > typed param
         let actualParam: String
         if let droppedPath = state.droppedFilePath, !param.isEmpty {
             actualParam = droppedPath
-        } else if param.isEmpty, tool.parameterName != nil,
-                  state.showFree, !state.freeCurrentText.isEmpty {
-            actualParam = state.freeCurrentText
-        } else if param.isEmpty, tool.parameterName != nil,
-                  let captured = state.preGrabbedSelectedText, !captured.isEmpty {
+        } else if tool.bindingKey == "translate", !param.isEmpty, let captured = capturedText {
+            // translate <lang> on selected text: the selection is the subject,
+            // the typed param is the target language — combine with the
+            // unambiguous ":code" suffix
+            let code = TranslateLang.normalize(param) ?? param.trimmingCharacters(in: .whitespaces).lowercased()
+            actualParam = "\(captured) :\(code)"
+        } else if param.isEmpty, tool.parameterName != nil, let captured = capturedText {
             actualParam = captured
         } else {
             actualParam = param

@@ -20,33 +20,14 @@ func registerTextTools(registry: ToolRegistry, settings: SettingsManager) {
 
     registry.register(ToolCommand(
         path: ["translate"],
-        description: "Translate word or phrase (e.g. translate poisson english)",
+        description: "Translate text — pick a target: translate en / fr / es (or :de)",
         parameterName: "text :lang",
         handler: { input in
-            guard !input.isEmpty else { return "Error: usage: translate [text] :[lang] or translate [text] [language]" }
+            guard !input.isEmpty else { return "Error: usage: translate [text] [lang], or select text and type a language like: translate es" }
 
-            // Parse target language
-            let parts = input.trimmingCharacters(in: .whitespaces)
-            var targetLang = settings.defaultTranslateTarget
-            var textToTranslate = parts
-
-            // Support ":en" syntax
-            if let colonRange = parts.range(of: #"\s+:[a-zA-Z]{2,5}$"#, options: .regularExpression) {
-                targetLang = String(parts[colonRange]).trimmingCharacters(in: .whitespaces).dropFirst().lowercased()
-                textToTranslate = String(parts[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespaces)
-            }
-            // Support language names
-            let langMap: [String: String] = [
-                "english": "en", "french": "fr", "spanish": "es", "german": "de",
-                "italian": "it", "portuguese": "pt", "chinese": "zh", "japanese": "ja",
-                "korean": "ko", "arabic": "ar", "russian": "ru", "dutch": "nl",
-                "anglais": "en", "francais": "fr", "espagnol": "es", "allemand": "de",
-            ]
-            let words = parts.split(separator: " ").map(String.init)
-            if let lastWord = words.last?.lowercased(), let code = langMap[lastWord] {
-                targetLang = code
-                textToTranslate = words.dropLast().joined(separator: " ")
-            }
+            let request = parseTranslateInput(input, default: settings.defaultTranslateTarget)
+            let targetLang = request.target
+            let textToTranslate = request.text
             guard !textToTranslate.isEmpty else { return "Error: no text to translate" }
 
             // Check settings: CLI (Google) or LLM
@@ -54,8 +35,9 @@ func registerTextTools(registry: ToolRegistry, settings: SettingsManager) {
                 let toolPath = "translate"
                 let prompt = settings.getSystemPrompt(for: toolPath, default: LLMToolPrompts.defaults[toolPath]!)
                 let provider = settings.getProvider(for: toolPath)
+                let langName = TranslateLang.names[targetLang] ?? targetLang
                 return try await LLMService.call(provider: provider, systemPrompt: prompt,
-                    userMessage: "Translate to \(targetLang): \(textToTranslate)")
+                    userMessage: "Translate to \(langName): \(textToTranslate)")
             }
 
             // CLI mode: translate-shell (Google Translate)
