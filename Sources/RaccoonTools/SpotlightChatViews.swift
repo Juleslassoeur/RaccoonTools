@@ -137,7 +137,8 @@ extension SpotlightView {
                             .padding(.horizontal, 12)
                         }
                     }
-                    .padding(.vertical, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
                 }
                 .onChange(of: state.promptMessages.count) { _ in
                     withAnimation {
@@ -285,7 +286,8 @@ extension SpotlightView {
                             .id("chat-loading")
                         }
                     }
-                    .padding(.vertical, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
                 }
                 .onChange(of: state.chatMessages.count) { _ in
                     withAnimation {
@@ -365,7 +367,8 @@ extension SpotlightView {
                             .id("qa-loading")
                         }
                     }
-                    .padding(.vertical, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
                 }
                 .onChange(of: state.qaMessages.count) { _ in
                     withAnimation {

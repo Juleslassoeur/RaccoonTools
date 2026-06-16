@@ -37,17 +37,19 @@ struct SettingsView: View {
 
             Divider()
 
-            Group {
-                switch section {
-                case .general: GeneralSettingsTab()
-                case .providers: LLMProvidersTab()
-                case .contextual: FreeModeSettingsTab()
-                case .tools: ToolBindingsTab()
-                case .library: ToolLibraryTab()
-                case .instantEdit: InstantEditSettingsTab()
+            ScrollView {
+                Group {
+                    switch section {
+                    case .general: GeneralSettingsTab()
+                    case .providers: LLMProvidersTab()
+                    case .contextual: FreeModeSettingsTab()
+                    case .tools: ToolBindingsTab()
+                    case .library: ToolLibraryTab()
+                    case .instantEdit: InstantEditSettingsTab()
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(width: 860, height: 560)
     }
@@ -531,37 +533,29 @@ struct LLMProvidersTab: View {
                 return FetchResult(models: names)
 
             case .claude:
-                // Anthropic has no list endpoint — test with a tiny request
                 let base = cleanBase(baseURL)
-                guard let url = URL(string: "\(base)/v1/messages") else { return FetchResult(error: "Invalid URL") }
+                guard let url = URL(string: "\(base)/v1/models") else { return FetchResult(error: "Invalid URL") }
                 var req = URLRequest(url: url)
-                req.httpMethod = "POST"
-                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
                 req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-                req.httpBody = try JSONSerialization.data(withJSONObject: [
-                    "model": "claude-sonnet-4-6", "max_tokens": 1,
-                    "messages": [["role": "user", "content": "hi"]]
-                ])
                 let (data, resp) = try await URLSession.shared.data(for: req)
-                if let http = resp as? HTTPURLResponse {
-                    if http.statusCode == 200 || http.statusCode == 400 {
-                        // 400 = valid key but bad request, still means connected
-                    } else if http.statusCode == 401 {
+                if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
+                    if http.statusCode == 401 {
                         return FetchResult(error: "Invalid API key")
-                    } else {
-                        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                           let err = json["error"] as? [String: Any],
-                           let msg = err["message"] as? String {
-                            return FetchResult(error: msg)
-                        }
                     }
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let err = json["error"] as? [String: Any],
+                       let msg = err["message"] as? String {
+                        return FetchResult(error: msg)
+                    }
+                    return FetchResult(error: "HTTP \(http.statusCode)")
                 }
-                return FetchResult(models: [
-                    "claude-opus-4-6",
-                    "claude-sonnet-4-6",
-                    "claude-haiku-4-5",
-                ])
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let models = json["data"] as? [[String: Any]] {
+                    let names = models.compactMap { $0["id"] as? String }.sorted()
+                    return FetchResult(models: names)
+                }
+                return FetchResult(error: "Invalid response")
             }
         } catch {
             return FetchResult(error: error.localizedDescription)

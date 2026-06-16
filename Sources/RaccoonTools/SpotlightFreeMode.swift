@@ -167,7 +167,8 @@ extension SpotlightView {
                                 .padding(.horizontal, 12)
                             }
                         }
-                        .padding(.vertical, 8)
+                        .padding(.top, 8)
+                        .padding(.bottom, 16)
                         .id("free-\(state.freeMessages.count)")
                     }
                     .onChange(of: state.freeMessages.count) { _ in

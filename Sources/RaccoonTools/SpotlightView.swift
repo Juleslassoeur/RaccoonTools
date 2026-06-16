@@ -277,7 +277,8 @@ struct SpotlightView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 16)
         .background(isError ? Color.red.opacity(0.05) : Color.green.opacity(0.05))
     }
 
