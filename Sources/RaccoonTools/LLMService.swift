@@ -48,6 +48,16 @@ struct LLMProviderConfig: Codable, Identifiable, Hashable {
         .init(id: "claude", name: "Claude", type: .claude, apiKey: "",
               model: "claude-sonnet-4-6", baseURL: "https://api.anthropic.com")
     }
+
+    static let retiredModelMigrations: [String: String] = [
+        "claude-sonnet-4-20250514": "claude-sonnet-4-6",
+        "claude-opus-4-20250514": "claude-opus-4-8",
+        "claude-3-5-sonnet-20241022": "claude-sonnet-4-6",
+        "claude-3-5-sonnet-20240620": "claude-sonnet-4-6",
+        "claude-3-7-sonnet-20250219": "claude-sonnet-4-6",
+        "claude-3-opus-20240229": "claude-opus-4-8",
+        "claude-3-5-haiku-20241022": "claude-haiku-4-5",
+    ]
     static var defaultOpenAI: LLMProviderConfig {
         .init(id: "openai", name: "OpenAI", type: .openai, apiKey: "",
               model: "gpt-4o", baseURL: "https://api.openai.com")

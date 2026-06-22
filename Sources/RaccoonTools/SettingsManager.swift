@@ -160,7 +160,7 @@ class SettingsManager: ObservableObject {
         try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
 
         // Load providers
-        var needsKeychainMigration = false
+        var needsResave = false
         let providersFile = configDir.appendingPathComponent("providers.json")
         if let data = try? Data(contentsOf: providersFile),
            var loaded = try? JSONDecoder().decode([LLMProviderConfig].self, from: data) {
@@ -170,11 +170,15 @@ class SettingsManager: ObservableObject {
                 if !jsonKey.isEmpty {
                     KeychainHelper.save(account: loaded[i].id, value: jsonKey)
                     loaded[i].apiKey = ""
-                    needsKeychainMigration = true
+                    needsResave = true
                 }
                 // Restore API key from Keychain
                 if let keychainKey = KeychainHelper.read(account: loaded[i].id) {
                     loaded[i].apiKey = keychainKey
+                }
+                if let replacement = LLMProviderConfig.retiredModelMigrations[loaded[i].model] {
+                    loaded[i].model = replacement
+                    needsResave = true
                 }
             }
             self.providers = loaded
@@ -192,7 +196,7 @@ class SettingsManager: ObservableObject {
         }
 
         // Re-save JSON with keys stripped after all properties are initialized
-        if needsKeychainMigration {
+        if needsResave {
             saveProviders()
         }
     }
