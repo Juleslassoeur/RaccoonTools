@@ -130,4 +130,15 @@ import Foundation
         #expect(LLMError.noAPIKey("Claude").errorDescription?.contains("Claude") == true)
         #expect(LLMError.api(status: 429, message: "rate limited").errorDescription == "API Error (429): rate limited")
     }
+
+    // Gemini 2.5 disables thinking via thinkingBudget, Gemini 3 rejects it (400)
+    // and expects thinkingLevel, older models accept neither: the fallback chain
+    // must keep this exact order and end with "no thinkingConfig".
+    @Test func geminiThinkingOffFallbackChain() {
+        let configs = LLMService.geminiThinkingOffConfigs
+        #expect(configs.count == 3)
+        #expect(configs[0]?["thinkingBudget"] as? Int == 0)
+        #expect(configs[1]?["thinkingLevel"] as? String == "minimal")
+        #expect(configs[2] == nil)
+    }
 }

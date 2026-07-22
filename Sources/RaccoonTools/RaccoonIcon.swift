@@ -2,9 +2,11 @@ import AppKit
 
 enum RaccoonIcon {
     static func menuBarIcon() -> NSImage {
-        // Load actual raccoon photo
+        // Load the raccoon photo; AppIcon.icns as fallback so installs
+        // without raccoon.jpg (old bottles) still get the raccoon.
         let searchPaths = [
             Bundle.main.resourcePath.map { "\($0)/raccoon.jpg" },
+            Bundle.main.resourcePath.map { "\($0)/AppIcon.icns" },
         ]
 
         for path in searchPaths.compactMap({ $0 }) {

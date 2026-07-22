@@ -422,8 +422,23 @@ class LLMService {
 
     // MARK: - Gemini
 
+    /// Thinking-off configs tried in order, falling through on HTTP 400:
+    /// Gemini 2.5 disables thinking via thinkingBudget, Gemini 3 rejects
+    /// thinkingBudget and expects thinkingLevel, older models accept no
+    /// thinkingConfig at all. Model aliases (gemini-flash-latest) move
+    /// across generations, so the accepted shape can't be known up front.
+    static let geminiThinkingOffConfigs: [[String: Any]?] = [
+        ["thinkingBudget": 0],
+        ["thinkingLevel": "minimal"],
+        nil,
+    ]
+
+    private static func geminiThinkingAttempts(_ p: LLMProviderConfig) -> [[String: Any]?] {
+        p.enableThinking ? [nil] : geminiThinkingOffConfigs
+    }
+
     private static func geminiRequest(_ p: LLMProviderConfig, system: String, messages: [LLMMessage],
-                                      streaming: Bool) throws -> URLRequest {
+                                      streaming: Bool, thinkingConfig: [String: Any]?) throws -> URLRequest {
         let apiKey = p.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         // Normalize baseURL: strip trailing slash and /v1beta if user included it
         var baseURL = p.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -448,33 +463,55 @@ class LLMService {
                 ["role": $0.role == .assistant ? "model" : "user", "parts": [["text": $0.content]]]
             },
         ]
-        if !p.enableThinking {
-            body["generationConfig"] = ["thinkingConfig": ["thinkingBudget": 0]]
+        if let thinkingConfig {
+            body["generationConfig"] = ["thinkingConfig": thinkingConfig]
         }
         return try jsonRequest(url: url, body: body, streaming: streaming)
     }
 
     private static func callGemini(_ p: LLMProviderConfig, system: String, messages: [LLMMessage]) async throws -> String {
-        let req = try geminiRequest(p, system: system, messages: messages, streaming: false)
-        let (data, http) = try await postJSON(req)
-        guard http.statusCode == 200 else {
-            throw LLMError.api(status: http.statusCode, message: apiErrorMessage(fromBody: data))
+        let attempts = geminiThinkingAttempts(p)
+        for (i, thinkingConfig) in attempts.enumerated() {
+            let req = try geminiRequest(p, system: system, messages: messages,
+                                        streaming: false, thinkingConfig: thinkingConfig)
+            let (data, http) = try await postJSON(req)
+            if http.statusCode == 400 && i < attempts.count - 1 { continue }
+            guard http.statusCode == 200 else {
+                throw LLMError.api(status: http.statusCode, message: apiErrorMessage(fromBody: data))
+            }
+            guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let candidates = json["candidates"] as? [[String: Any]],
+                  let content = candidates.first?["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]],
+                  let text = parts.first?["text"] as? String else {
+                let raw = String(data: data, encoding: .utf8) ?? "unreadable"
+                throw LLMError.invalidResponse("unexpected Gemini response shape — \(String(raw.prefix(200)))")
+            }
+            return text
         }
-        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let candidates = json["candidates"] as? [[String: Any]],
-              let content = candidates.first?["content"] as? [String: Any],
-              let parts = content["parts"] as? [[String: Any]],
-              let text = parts.first?["text"] as? String else {
-            let raw = String(data: data, encoding: .utf8) ?? "unreadable"
-            throw LLMError.invalidResponse("unexpected Gemini response shape — \(String(raw.prefix(200)))")
-        }
-        return text
+        throw LLMError.invalidResponse("no Gemini request attempted") // unreachable, attempts is never empty
     }
 
     private static func streamGemini(_ p: LLMProviderConfig, system: String, messages: [LLMMessage],
                                      onDelta: @escaping @Sendable (String) -> Void) async throws -> String {
-        let req = try geminiRequest(p, system: system, messages: messages, streaming: true)
-        let bytes = try await openByteStream(req)
+        // openByteStream fails before any delta is emitted, so falling through
+        // to the next thinking config never duplicates streamed text.
+        let attempts = geminiThinkingAttempts(p)
+        var stream: URLSession.AsyncBytes?
+        for (i, thinkingConfig) in attempts.enumerated() {
+            let req = try geminiRequest(p, system: system, messages: messages,
+                                        streaming: true, thinkingConfig: thinkingConfig)
+            do {
+                stream = try await openByteStream(req)
+                break
+            } catch LLMError.api(let status, let message) {
+                if status == 400 && i < attempts.count - 1 { continue }
+                throw LLMError.api(status: status, message: message)
+            }
+        }
+        guard let bytes = stream else {
+            throw LLMError.invalidResponse("no Gemini request attempted") // unreachable, attempts is never empty
+        }
         var full = ""
         do {
             for try await line in bytes.lines {
